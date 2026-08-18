@@ -7,6 +7,11 @@ const { Client } = require('minecraft-launcher-core');
 
 Menu.setApplicationMenu(null);
 
+// The GPU process crashes on this machine (exit_code=34) and Electron retries it
+// three times before falling back to software rendering, which just wastes about
+// a second of every startup. The UI is plain tiles, so the CPU handles it fine.
+app.disableHardwareAcceleration();
+
 // Set from settings.json at startup, see below - the file is read there.
 let currentLocale = 'ru';
 

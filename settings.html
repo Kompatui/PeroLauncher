@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Pero Launcher — Настройки</title>
+  <link rel="stylesheet" href="src/style.css">
+  <link rel="stylesheet" href="src/settings.css">
+</head>
+<body>
+  <div class="titlebar">
+    <div class="titlebar-left">
+      <button id="btn-back" class="back-btn">←</button>
+      <img src="assets/icons/logo.png" class="app-icon" alt="">
+      <span class="app-title">Pero V1.0.0</span>
+    </div>
+    <div class="titlebar-buttons">
+      <button id="btn-min" class="win-btn">
+          <svg width="10" height="10"><line x1="0" y1="5" x2="10" y2="5" stroke="black" stroke-width="1"/></svg>
+      </button>
+      <button id="btn-max" class="win-btn"></button>
+      <button id="btn-close" class="win-btn close-btn">
+          <svg width="10" height="10"><line x1="0" y1="0" x2="10" y2="10" stroke="black" stroke-width="1"/><line x1="10" y1="0" x2="0" y2="10" stroke="black" stroke-width="1"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="settings-page">
+    <div class="settings-row compact" id="row-version">
+      <span class="settings-label">Версия</span>
+      <span class="settings-value" id="current-version">—</span>
+    </div>
+
+    <div class="settings-row compact" id="row-account">
+      <span class="settings-label">Аккаунт</span>
+      <span class="settings-value" id="current-account">—</span>
+    </div>
+
+    <div class="settings-row compact full ram-row">
+      <span class="settings-label">Память (ОЗУ)</span>
+      <div class="ram-controls">
+        <input type="range" id="ram-slider" min="1024" step="512">
+        <input type="number" id="ram-number" step="512">
+        <span>МиБ</span>
+        <label class="auto-label">
+          <input type="checkbox" id="ram-auto"> Авто
+        </label>
+      </div>
+    </div>
+
+    <div class="settings-list">
+      <div class="settings-item value" id="item-versions">
+        <span class="settings-label">Показывать версии</span>
+        <span class="settings-value">Настроить</span>
+      </div>
+
+      <div class="settings-item value" id="item-java">
+        <span class="settings-label">Java / JRE</span>
+        <span class="settings-value" id="current-java">Автоматически</span>
+      </div>
+
+      <div class="settings-item windowsize-item">
+        <span class="settings-label">Размер окна</span>
+        <div class="windowsize-controls">
+          <input type="number" id="win-w" style="width:70px">
+          <span>x</span>
+          <input type="number" id="win-h" style="width:70px">
+          <label class="auto-label">
+            <input type="checkbox" id="win-fullscreen"> Весь экран
+          </label>
+        </div>
+      </div>
+
+      <div class="settings-item value" id="item-gamefolder">
+        <span class="settings-label">Папка игры</span>
+        <span class="settings-value" id="current-gamefolder">—</span>
+      </div>
+
+      <div class="settings-item value" id="item-language">
+        <span class="settings-label">Язык</span>
+        <span class="settings-value" id="current-language">—</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay hidden" id="modal-overlay">
+    <div class="modal-box" id="modal-box"></div>
+  </div>
+
+  <script src="src/i18n.js"></script>
+  <script src="src/settings.js"></script>
+</body>
+</html>

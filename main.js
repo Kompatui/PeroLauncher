@@ -9,7 +9,10 @@ Menu.setApplicationMenu(null);
 
 let currentLocale = 'ru';
 
-const settingsPath = 'D:\\PeroLauncherData\\settings.json';
+// Диск C не используем — на нём мало места. Всё хранится на E.
+app.setPath('userData', 'E:\\PeroLauncher\\userdata');
+
+const settingsPath = 'E:\\PeroLauncher\\settings.json';
 
 const defaultSettings = {
   version: '1.21.1',
@@ -19,7 +22,7 @@ const defaultSettings = {
   windowWidth: 854,
   windowHeight: 480,
   fullscreen: false,
-  gameFolder: 'D:\\PeroLauncherData',
+  gameFolder: 'E:\\.minecraft',
   language: 'ru',
   javaPath: null,
   versionFilters: {

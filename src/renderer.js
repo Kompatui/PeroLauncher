@@ -6,7 +6,8 @@ document.getElementById('tile-play').addEventListener('click', async () => {
   const profile = await window.api.loginMicrosoft();
   console.log('Signed in as:', profile.name, profile.uuid);
   console.log('Launching the game...');
-  await window.api.launchGame(profile);
+  const result = await window.api.launchGame(profile);
+  if (!result.started) console.error('Launch failed:', result.error);
 });
 
 document.getElementById('tile-folder').addEventListener('click', () => {

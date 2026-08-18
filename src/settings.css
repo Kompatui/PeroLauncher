@@ -156,6 +156,78 @@
   background: #e0e0e0;
 }
 
+.modal-note {
+  margin: 0;
+  font-size: 14px;
+  color: #666;
+}
+
+.modal-note.warn {
+  color: #8a5a00;
+  background: #fdf3e0;
+  padding: 8px 10px;
+  border-radius: 4px;
+}
+
+.modal-search {
+  padding: 8px 10px;
+  font-size: 14px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  outline: none;
+}
+
+.modal-search:focus {
+  border-color: #bbb;
+}
+
+/* The list can hold hundreds of versions, so it scrolls on its own
+   instead of stretching the modal past the window. */
+.version-list {
+  max-height: 45vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.version-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 15px;
+}
+
+.version-row:hover {
+  background: #f0f0f0;
+}
+
+.version-row.current {
+  background: #e8f3e9;
+  font-weight: bold;
+}
+
+.version-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #888;
+  white-space: nowrap;
+}
+
+.version-installed {
+  background: #e0e0e0;
+  color: #555;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
 .modal-lang-option {
   padding: 10px;
   background: #f0f0f0;
@@ -167,6 +239,28 @@
 .modal-lang-option:hover {
   background: #e0e0e0;
 }
+
+.modal-lang-option.current {
+  background: #e8f3e9;
+  font-weight: bold;
+}
+
+.modal-lang-option.disabled {
+  color: #aaa;
+  cursor: default;
+}
+
+.modal-lang-option.disabled:hover {
+  background: #f0f0f0;
+}
+
+.loader-soon {
+  font-size: 12px;
+  color: #999;
+}
+
+#row-loader { background: #ededed; }
+#row-loader:hover { background: #dcdcdc; }
 
 .back-btn {
   -webkit-app-region: no-drag;

@@ -64,6 +64,14 @@ function renderTranslatedValues() {
     settings.accountName || t('account.notSignedIn');
   document.getElementById('current-java').textContent =
     settings.javaPath || t('settings.javaAuto');
+  document.getElementById('current-loader').textContent = loaderSummary();
+}
+
+// "Fabric 0.19.3" when a loader is picked, the translated "none" otherwise.
+function loaderSummary() {
+  if (!settings.loader || settings.loader === 'vanilla') return t('loader.vanillaShort');
+  const name = MOD_LOADERS.find(l => l.id === settings.loader)?.name || settings.loader;
+  return settings.loaderVersion ? `${name} ${settings.loaderVersion}` : name;
 }
 
 document.addEventListener('translations-applied', renderTranslatedValues);
@@ -149,6 +157,10 @@ overlay.addEventListener('click', (e) => {
   if (e.target === overlay) closeModal();
 });
 
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !overlay.classList.contains('hidden')) closeModal();
+});
+
 // Order of the checkboxes in the version filter modal.
 // The captions live in locales/*.json under filters.*
 const versionFilterKeys = [
@@ -194,6 +206,222 @@ document.getElementById('item-versions').addEventListener('click', () => {
   document.getElementById('modal-cancel').addEventListener('click', closeModal);
 });
 
+// Mojang files its April Fools and one-off builds as ordinary snapshots
+// (25w14craftmine, 24w14potato, 3D Shareware v1.34 and friends). They carry no
+// common marker, so they are found the other way round: a snapshot whose name
+// fits none of the regular patterns is an experiment.
+// Only ever called for type === 'snapshot'.
+function isExperimental(id) {
+  const weeklySnapshot = /^\d{2}w\d{2}[a-z]$/.test(id);       // 24w33a
+  const preRelease = /(-pre|-rc|pre-release)/i.test(id);      // 26.2-pre-6, 1.14 Pre-Release 1
+  const numberedSnapshot = /-snapshot-\d+$/.test(id);         // 26.3-snapshot-9
+  const plainNumber = /^\d+(\.\d+)*$/.test(id);               // 1.6.3
+  return !weeklySnapshot && !preRelease && !numberedSnapshot && !plainNumber;
+}
+
+function versionTypeLabel(version) {
+  if (version.custom) return t('version.typeCustom');
+  if (version.type === 'old_alpha') return t('version.typeAlpha');
+  if (version.type === 'old_beta') return t('version.typeBeta');
+  if (version.type === 'snapshot') {
+    return isExperimental(version.id) ? t('version.typeExperimental') : t('version.typeSnapshot');
+  }
+  return t('version.typeRelease');
+}
+
+function versionPassesFilters(version, filters, oldReleaseCutoff) {
+  if (filters.onlyInstalled && !version.installed) return false;
+  if (version.custom) return !!filters.mods;
+  if (version.type === 'old_alpha') return !!filters.alpha;
+  if (version.type === 'old_beta') return !!filters.beta;
+  if (version.type === 'snapshot') {
+    return isExperimental(version.id) ? !!filters.experimental : !!filters.snapshots;
+  }
+  if (version.type === 'release' && oldReleaseCutoff && version.releaseTime) {
+    const isOld = new Date(version.releaseTime) < new Date(oldReleaseCutoff);
+    if (isOld) return !!filters.oldReleases;
+  }
+  return true;
+}
+
+document.getElementById('row-version').addEventListener('click', async () => {
+  modalBox.innerHTML = `
+    <h3>${t('version.select')}</h3>
+    <p class="modal-note">${t('version.loading')}</p>
+  `;
+  overlay.classList.remove('hidden');
+
+  const data = await window.api.getVersions();
+
+  // The overlay may have been dismissed while the list was loading.
+  if (overlay.classList.contains('hidden')) return;
+
+  let notice = '';
+  if (data.error && data.source === 'cache') notice = t('version.offlineCache');
+  if (data.error && data.source !== 'cache') notice = t('version.offlineNoCache');
+
+  modalBox.innerHTML = `
+    <h3>${t('version.select')}</h3>
+    ${notice ? `<p class="modal-note warn">${notice}</p>` : ''}
+    <input type="text" id="version-search" class="modal-search" placeholder="${t('version.search')}">
+    <div class="version-list" id="version-list"></div>
+    <div class="modal-buttons">
+      <button class="modal-btn-cancel" id="modal-cancel">${t('modal.close')}</button>
+    </div>
+  `;
+
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
+
+  const listBox = document.getElementById('version-list');
+  const search = document.getElementById('version-search');
+
+  const visible = data.versions.filter(v =>
+    versionPassesFilters(v, settings.versionFilters, data.oldReleaseCutoff)
+  );
+
+  function renderList() {
+    const query = search.value.trim().toLowerCase();
+    const matched = query
+      ? visible.filter(v => v.id.toLowerCase().includes(query))
+      : visible;
+
+    if (matched.length === 0) {
+      listBox.innerHTML = `<p class="modal-note">${t('version.empty')}</p>`;
+      return;
+    }
+
+    listBox.innerHTML = matched.map(v => `
+      <div class="version-row${v.id === settings.version ? ' current' : ''}" data-id="${v.id}">
+        <span class="version-id">${v.id}</span>
+        <span class="version-meta">
+          ${v.installed ? `<span class="version-installed">${t('version.installed')}</span>` : ''}
+          ${versionTypeLabel(v)}
+        </span>
+      </div>
+    `).join('');
+
+    listBox.querySelectorAll('.version-row').forEach(row => {
+      row.addEventListener('click', async () => {
+        settings.version = row.dataset.id;
+        document.getElementById('current-version').textContent = settings.version;
+        await saveSettings();
+        closeModal();
+      });
+    });
+  }
+
+  search.addEventListener('input', renderList);
+  renderList();
+  search.focus();
+});
+
+// Loaders are added one at a time; `ready: false` ones are listed but not
+// selectable yet, so the picker shows the whole picture instead of hiding it.
+const MOD_LOADERS = [
+  { id: 'fabric', name: 'Fabric', ready: true },
+  { id: 'quilt', name: 'Quilt', ready: true },
+  { id: 'forge', name: 'Forge', ready: false },
+  { id: 'neoforge', name: 'NeoForge', ready: false }
+];
+
+function closeButtonHtml() {
+  return `
+    <div class="modal-buttons">
+      <button class="modal-btn-cancel" id="modal-cancel">${t('modal.close')}</button>
+    </div>
+  `;
+}
+
+function wireCloseButton() {
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
+}
+
+async function pickLoaderVersion(loader) {
+  modalBox.innerHTML = `
+    <h3>${loader.name}</h3>
+    <p class="modal-note">${t('loader.loading')}</p>
+    ${closeButtonHtml()}
+  `;
+  wireCloseButton();
+
+  const data = await window.api.getLoaderVersions(loader.id, settings.version);
+  if (overlay.classList.contains('hidden')) return;
+
+  if (data.error || data.versions.length === 0) {
+    modalBox.innerHTML = `
+      <h3>${loader.name}</h3>
+      <p class="modal-note warn">${t('loader.unsupported')}</p>
+      ${closeButtonHtml()}
+    `;
+    wireCloseButton();
+    return;
+  }
+
+  modalBox.innerHTML = `
+    <h3>${loader.name} — ${t('loader.pickVersion')}</h3>
+    <p class="modal-note">${t('settings.version')}: ${settings.version}</p>
+    <div class="version-list" id="loader-list">
+      ${data.versions.map(v => `
+        <div class="version-row${v.version === settings.loaderVersion && settings.loader === loader.id ? ' current' : ''}" data-version="${v.version}">
+          <span class="version-id">${v.version}</span>
+          <span class="version-meta">${v.stable ? t('loader.stable') : ''}</span>
+        </div>
+      `).join('')}
+    </div>
+    ${closeButtonHtml()}
+  `;
+  wireCloseButton();
+
+  document.getElementById('loader-list').querySelectorAll('.version-row').forEach(row => {
+    row.addEventListener('click', async () => {
+      // Only remembers the choice. The profile is fetched when the game is
+      // actually launched, so browsing loaders leaves nothing on disk.
+      settings.loader = loader.id;
+      settings.loaderVersion = row.dataset.version;
+      document.getElementById('current-loader').textContent = loaderSummary();
+      await saveSettings();
+      closeModal();
+    });
+  });
+}
+
+document.getElementById('row-loader').addEventListener('click', () => {
+  const isVanilla = !settings.loader || settings.loader === 'vanilla';
+
+  modalBox.innerHTML = `
+    <h3>${t('loader.select')}</h3>
+    <div class="modal-lang-option${isVanilla ? ' current' : ''}" data-loader="vanilla">
+      ${t('loader.vanilla')}
+    </div>
+    ${MOD_LOADERS.map(l => `
+      <div class="modal-lang-option${l.ready ? '' : ' disabled'}${settings.loader === l.id ? ' current' : ''}"
+           data-loader="${l.ready ? l.id : ''}">
+        ${l.name}${l.ready ? '' : ` <span class="loader-soon">${t('loader.soon')}</span>`}
+      </div>
+    `).join('')}
+    ${closeButtonHtml()}
+  `;
+  overlay.classList.remove('hidden');
+  wireCloseButton();
+
+  modalBox.querySelectorAll('.modal-lang-option').forEach(option => {
+    const loaderId = option.dataset.loader;
+    if (!loaderId) return;
+
+    option.addEventListener('click', async () => {
+      if (loaderId === 'vanilla') {
+        settings.loader = 'vanilla';
+        settings.loaderVersion = null;
+        document.getElementById('current-loader').textContent = loaderSummary();
+        await saveSettings();
+        closeModal();
+        return;
+      }
+      await pickLoaderVersion(MOD_LOADERS.find(l => l.id === loaderId));
+    });
+  });
+});
+
 document.getElementById('item-java').addEventListener('click', async () => {
   const javaPath = await window.api.pickJava();
   if (javaPath) {
@@ -218,8 +446,13 @@ document.getElementById('item-language').addEventListener('click', () => {
     <div class="modal-lang-option" data-lang="ru">Русский</div>
     <div class="modal-lang-option" data-lang="en">English</div>
     <div class="modal-lang-option" data-lang="de">Deutsch</div>
+    <div class="modal-buttons">
+      <button class="modal-btn-cancel" id="modal-cancel">${t('modal.close')}</button>
+    </div>
   `;
   overlay.classList.remove('hidden');
+
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
 
   modalBox.querySelectorAll('.modal-lang-option').forEach(opt => {
     opt.addEventListener('click', async () => {

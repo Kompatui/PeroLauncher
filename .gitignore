@@ -6,6 +6,7 @@ dist/
 # userdata holds the Microsoft auth session and must not be published.
 userdata/
 settings.json
+versions-cache.json
 
 # Local tooling notes and settings
 .claude/

@@ -16,5 +16,7 @@ contextBridge.exposeInMainWorld('api', {
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
   pickFolder: () => ipcRenderer.invoke('pick-folder'),
   pickJava: () => ipcRenderer.invoke('pick-java'),
-  getSystemRam: () => ipcRenderer.invoke('get-system-ram')
+  getSystemRam: () => ipcRenderer.invoke('get-system-ram'),
+  getVersions: () => ipcRenderer.invoke('get-versions'),
+  getLoaderVersions: (loader, mcVersion) => ipcRenderer.invoke('get-loader-versions', loader, mcVersion)
 });

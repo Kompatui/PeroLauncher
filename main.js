@@ -605,6 +605,11 @@ function forgeLoader() {
     kind: 'installer',
 
     async listVersions(mcVersion) {
+      // Forge before 1.6 installed itself by patching minecraft.jar, so its
+      // archives carry no version.json and nothing here can launch them.
+      // Offering those builds would be a dead end.
+      if (!forgeCanLaunch(mcVersion)) return [];
+
       await metadata();
       const all = [...metadataCache.matchAll(/<version>([^<]+)<\/version>/g)].map(m => m[1]);
 
@@ -636,15 +641,35 @@ function forgeLoader() {
 
     async ensureInstaller(mcVersion, loaderVersion) {
       const build = `${mcVersion}-${loaderVersion}`;
-      const file = path.join(loadersDir, `forge-${build}-installer.jar`);
+      const kind = forgeArtifactKind(mcVersion);
+      const file = path.join(loadersDir, `forge-${build}-${kind}.jar`);
       if (fs.existsSync(file)) return file;
 
-      const url = `${maven}/${build}/forge-${build}-installer.jar`;
+      const url = `${maven}/${build}/forge-${build}-${kind}.jar`;
       fs.mkdirSync(loadersDir, { recursive: true });
       fs.writeFileSync(file, await fetchBuffer(url));
       return file;
     }
   };
+}
+
+// Forge ships two archives and only one of them carries the version.json that
+// minecraft-launcher-core reads. The split is at 1.12: from there the installer
+// holds it, before that the universal jar does. Hand over the wrong one and
+// MCLC quietly falls back to vanilla while still leaving the jar on the class
+// path, where its bundled copy of jopt-simple breaks the game on startup.
+function forgeArtifactKind(mcVersion) {
+  const parts = mcVersion.split('.');
+  if (parts[0] !== '1') return 'installer';   // 26.2 and friends
+  return Number(parts[1]) >= 12 ? 'installer' : 'universal';
+}
+
+// 1.5.2 and older keep no version.json in any of their archives - that era of
+// Forge installed itself by patching minecraft.jar, which nothing here does.
+function forgeCanLaunch(mcVersion) {
+  const parts = mcVersion.split('.');
+  if (parts[0] !== '1') return true;
+  return Number(parts[1]) >= 6;
 }
 
 // NeoForge numbers its builds after the game version with the leading "1."
@@ -684,11 +709,25 @@ function neoforgeLoader() {
     async listVersions(mcVersion) {
       const all = await allBuilds();
       const prefix = neoforgeVersionPrefix(mcVersion);
-      return all
+      const builds = all
         .filter(version => version.startsWith(prefix))
         .sort(compareBuildNumbers)
-        .reverse()
-        .map(version => ({ version, stable: !/alpha|beta|rc|snapshot/i.test(version) }));
+        .reverse();
+
+      // The catalogue sometimes lists a build whose installer is not uploaded
+      // yet (26.2.0.64 was). Those sit at the top, where people pick from, so
+      // the newest few are checked and the missing ones dropped.
+      while (builds.length > 0) {
+        const newest = builds[0];
+        const url = `${maven}/${newest}/neoforge-${newest}-installer.jar`;
+        if (await urlExists(url)) break;
+        builds.shift();
+      }
+
+      return builds.map(version => ({
+        version,
+        stable: !/alpha|beta|rc|snapshot/i.test(version)
+      }));
     },
 
     profileId(mcVersion, loaderVersion) {
@@ -752,6 +791,16 @@ async function fetchText(url) {
 
 async function fetchBuffer(url, options = {}) {
   return Buffer.from(await (await fetchWithRetry(url, options)).arrayBuffer());
+}
+
+// "Is this file actually there" - a missing file is an answer, not a failure.
+async function urlExists(url) {
+  try {
+    await fetchWithRetry(url, { method: 'HEAD' });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Fabric and Quilt share the same meta API shape, so one description covers

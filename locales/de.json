@@ -52,5 +52,11 @@
   "java.foundInSystem": "auf diesem Rechner gefunden",
   "java.willDownload": "nicht gefunden, wird beim Start heruntergeladen",
   "java.downloadedByLauncher": "vom Launcher heruntergeladen",
-  "java.browse": "Datei manuell auswählen…"
+  "java.browse": "Datei manuell auswählen…",
+  "crash.title": "Das Spiel wurde beendet",
+  "crash.outOfMemoryShort": "Zu wenig Arbeitsspeicher",
+  "crash.outOfMemory": "Dem Spiel ging beim Start der Speicher aus. Schließe andere Programme (Browser, Code-Editor) oder verringere den zugewiesenen Speicher in den Einstellungen.",
+  "crash.givenRam": "Dem Spiel zugewiesen",
+  "crash.freeRam": "Momentan frei",
+  "crash.exitCode": "Exit-Code"
 }

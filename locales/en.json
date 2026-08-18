@@ -52,5 +52,11 @@
   "java.foundInSystem": "found on this machine",
   "java.willDownload": "not found, will be downloaded on launch",
   "java.downloadedByLauncher": "downloaded by the launcher",
-  "java.browse": "Pick a file manually…"
+  "java.browse": "Pick a file manually…",
+  "crash.title": "The game closed",
+  "crash.outOfMemoryShort": "Not enough memory",
+  "crash.outOfMemory": "The game ran out of memory while starting. Close other programs (browser, code editor) or lower the memory given to the game in the settings.",
+  "crash.givenRam": "Given to the game",
+  "crash.freeRam": "Free right now",
+  "crash.exitCode": "Exit code"
 }

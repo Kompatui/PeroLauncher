@@ -125,6 +125,16 @@ ipcMain.handle('get-system-ram', () => {
   return Math.floor(os.totalmem() / 1024 / 1024);
 });
 
+// Half the machine, never eating into the last 2 GB. Deliberately measured
+// against total memory, not free memory: -Xmx is a ceiling the game grows into,
+// not memory taken up front, and every normal launcher lets you set more than
+// is free at the moment. Clamping to free memory would also lock the game into
+// a tiny heap just because a browser happened to be open at launch.
+function autoRamMB() {
+  const totalMB = Math.floor(os.totalmem() / 1024 / 1024);
+  return Math.max(1024, Math.round(Math.min(totalMB / 2, totalMB - 2048) / 512) * 512);
+}
+
 ipcMain.handle('pick-folder', async () => {
   const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
   if (result.canceled || result.filePaths.length === 0) return null;
@@ -160,9 +170,7 @@ ipcMain.handle('launch-game', async (event, profile) => {
   const settings = loadSettings();
   const launcher = new Client();
 
-  const effectiveRam = settings.ramAuto
-    ? Math.max(1024, Math.round(Math.min(os.totalmem() / 1024 / 1024 / 2, os.totalmem() / 1024 / 1024 - 2048) / 512) * 512)
-    : settings.ram;
+  const effectiveRam = settings.ramAuto ? autoRamMB() : settings.ram;
 
   const opts = {
     authorization: profile.mclc,
@@ -173,7 +181,9 @@ ipcMain.handle('launch-game', async (event, profile) => {
     },
     memory: {
       max: effectiveRam + "M",
-      min: "1024M"
+      // Committed up front, so keep it small: the game grows into the max on
+      // its own. A large min is what makes a tight machine fail at startup.
+      min: Math.min(512, effectiveRam) + "M"
     },
     window: {
       width: settings.windowWidth,
@@ -219,10 +229,42 @@ ipcMain.handle('launch-game', async (event, profile) => {
   launcher.launch(opts);
 
   launcher.on('debug', (e) => console.log('[DEBUG]', e));
-  launcher.on('data', (e) => console.log('[DATA]', e));
+
+  // The game's own output is the only place its reason for dying shows up,
+  // so keep the tail of it around for the report below.
+  const recentOutput = [];
+  launcher.on('data', (e) => {
+    console.log('[DATA]', e);
+    recentOutput.push(String(e));
+    if (recentOutput.length > 60) recentOutput.shift();
+  });
+
+  launcher.on('close', (code) => {
+    if (code === 0) return;
+    reportGameCrash(code, recentOutput.join('\n'), effectiveRam);
+  });
 
   return { started: true, error: null };
 });
+
+// Without this the launcher stays silent and the game just blinks and
+// disappears, which tells the player nothing at all.
+function reportGameCrash(code, output, effectiveRam) {
+  const t = loadTranslations(currentLocale);
+  const outOfMemory = /insufficient memory|OutOfMemoryError|failed to allocate/i.test(output);
+
+  const detail = outOfMemory
+    ? `${t['crash.outOfMemory']}\n\n${t['crash.givenRam']}: ${effectiveRam} ${t['settings.mib']}\n` +
+      `${t['crash.freeRam']}: ${Math.floor(os.freemem() / 1024 / 1024)} ${t['settings.mib']}`
+    : `${t['crash.exitCode']}: ${code}\n\n${output.trim().split('\n').slice(-6).join('\n')}`;
+
+  dialog.showMessageBox({
+    type: 'warning',
+    title: t['crash.title'],
+    message: outOfMemory ? t['crash.outOfMemoryShort'] : t['crash.title'],
+    detail
+  });
+}
 
 // A version counts as installed when its folder holds a matching .json,
 // which is what minecraft-launcher-core needs to start it.

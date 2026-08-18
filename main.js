@@ -216,6 +216,18 @@ ipcMain.handle('launch-game', async (event, profile) => {
         opts.version.custom = await loader.installJarMod(
           settings.version, settings.loaderVersion, settings.gameFolder
         );
+        await loader.ensureFmlLibraries(
+          settings.version, settings.loaderVersion, settings.gameFolder
+        );
+
+        // Forge of that era ignores --gameDir entirely and works out the game
+        // folder on its own, landing in %APPDATA%\.minecraft. This property is
+        // the only thing it listens to, and it is how launchers have always
+        // pointed it somewhere else.
+        opts.customArgs = [
+          ...(opts.customArgs || []),
+          `-Dminecraft.applet.TargetDirectory=${settings.gameFolder}`
+        ];
       } else if (kind === 'installer-run') {
         const profileId = loader.profileId(settings.version, settings.loaderVersion);
         const profileFile = path.join(settings.gameFolder, 'versions', profileId, `${profileId}.json`);
@@ -728,15 +740,46 @@ function forgeLoader() {
     },
 
     // 1.4 and 1.5 call it universal.zip, 1.1 through 1.3 call it client.zip.
+    // Kept on disk: the library step below reads it again.
     async fetchJarModArchive(build) {
+      const cached = path.join(loadersDir, `forge-${build}-jarmod.zip`);
+      if (fs.existsSync(cached)) return fs.readFileSync(cached);
+
       for (const name of [`forge-${build}-universal.zip`, `forge-${build}-client.zip`]) {
         try {
-          return await fetchBuffer(`${maven}/${build}/${name}`);
+          const archive = await fetchBuffer(`${maven}/${build}/${name}`);
+          fs.mkdirSync(loadersDir, { recursive: true });
+          fs.writeFileSync(cached, archive);
+          return archive;
         } catch (e) {
           if (!/^HTTP 4\d\d$/.test(e.message)) throw e;
         }
       }
       throw new Error('no universal or client archive published for this build');
+    },
+
+    // FML of that era fetches its own dependencies from a Forge server that
+    // has been gone for years, and dies when it cannot. The files still exist
+    // elsewhere, so the launcher puts them in place beforehand and FML finds
+    // everything it needs already there.
+    async ensureFmlLibraries(mcVersion, loaderVersion, gameFolder) {
+      const archive = await this.fetchJarModArchive(`${mcVersion}-${loaderVersion}`);
+      const required = readFmlLibraryList(archive);
+      if (required.length === 0) return;
+
+      const libDirectory = path.join(gameFolder, 'lib');
+      fs.mkdirSync(libDirectory, { recursive: true });
+
+      for (const library of required) {
+        await placeFmlLibrary(library, libDirectory);
+      }
+
+      // Its name carries the game version; the hash lives in a build property
+      // we cannot read, so the file is trusted to be the archived original.
+      await placeFmlLibrary(
+        { name: `deobfuscation_data_${mcVersion}.zip`, sha1: null },
+        libDirectory
+      );
     }
   };
 }
@@ -760,6 +803,92 @@ function forgeUsesJarMod(mcVersion) {
   const parts = mcVersion.split('.');
   if (parts[0] !== '1') return false;
   return Number(parts[1]) < 6;
+}
+
+// FML lists what it needs, and the sha1 of each file, inside its own
+// CoreFMLLibraries class: first the names, then the hashes, in the same order.
+// Reading them from the build itself means every Forge version is covered
+// without a table of our own that would go stale.
+function readFmlLibraryList(archive) {
+  const entry = new AdmZip(archive).getEntry('cpw/mods/fml/relauncher/CoreFMLLibraries.class');
+  if (!entry) return [];   // Forge older than FML - nothing to fetch.
+
+  const text = entry.getData().toString('latin1');
+  const strings = text.match(/[\x20-\x7e]{4,}/g) || [];
+  const names = strings.filter(value => /\.(jar|zip)$/.test(value));
+  const hashes = strings.flatMap(value => value.match(/[0-9a-f]{40}/g) || []);
+
+  return names.map((name, index) => ({ name, sha1: hashes[index] || null }));
+}
+
+// Maven Central still carries the ordinary libraries untouched. The two Forge
+// built for itself - a stripped argo and their own scala build - exist only in
+// the web archive now, which is where the rest come from when Central has
+// nothing matching.
+const FML_LIBRARY_ON_MAVEN = {
+  'guava-14.0-rc3.jar': 'com/google/guava/guava/14.0-rc3/guava-14.0-rc3.jar',
+  'guava-12.0.1.jar': 'com/google/guava/guava/12.0.1/guava-12.0.1.jar',
+  'asm-all-4.1.jar': 'org/ow2/asm/asm-all/4.1/asm-all-4.1.jar',
+  'asm-all-4.0.jar': 'org/ow2/asm/asm-all/4.0/asm-all-4.0.jar',
+  'bcprov-jdk15on-148.jar': 'org/bouncycastle/bcprov-jdk15on/1.48/bcprov-jdk15on-1.48.jar',
+  'bcprov-jdk15on-147.jar': 'org/bouncycastle/bcprov-jdk15on/1.47/bcprov-jdk15on-1.47.jar'
+};
+
+const FML_LIBRARY_ORIGIN = 'http://files.minecraftforge.net/fmllibs/';
+
+async function placeFmlLibrary(library, libDirectory) {
+  const destination = path.join(libDirectory, library.name);
+
+  if (fs.existsSync(destination)) {
+    if (!library.sha1 || sha1Of(destination) === library.sha1) return;
+    fs.unlinkSync(destination);
+  }
+
+  const sources = [];
+  if (FML_LIBRARY_ON_MAVEN[library.name]) {
+    sources.push(`https://repo1.maven.org/maven2/${FML_LIBRARY_ON_MAVEN[library.name]}`);
+  }
+  // Several snapshots, not one: the archive serves an old capture badly often
+  // enough that a single address is not a reliable source.
+  sources.push(...await archivedUrls(FML_LIBRARY_ORIGIN + library.name));
+
+  let lastError = new Error('no source');
+  for (const source of sources) {
+    try {
+      const data = await fetchBuffer(source);
+      if (library.sha1 && crypto.createHash('sha1').update(data).digest('hex') !== library.sha1) {
+        lastError = new Error(`${library.name}: checksum mismatch`);
+        continue;
+      }
+      fs.writeFileSync(destination, data);
+      return;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+
+  throw new Error(`${library.name}: ${lastError.message}`);
+}
+
+// Every archived capture of a long-dead address, newest first. Only captures
+// that answered 200 at the time are worth trying, and even those sometimes
+// fail to replay, so the caller walks the list.
+async function archivedUrls(originalUrl) {
+  const index = 'https://web.archive.org/cdx/search/cdx' +
+    `?url=${encodeURIComponent(originalUrl)}&output=json&filter=statuscode:200&limit=-6`;
+
+  let rows;
+  try {
+    rows = await fetchJson(index);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(rows) || rows.length < 2) return [];
+
+  return rows.slice(1)
+    .map(row => row[1])
+    .reverse()
+    .map(timestamp => `https://web.archive.org/web/${timestamp}id_/${originalUrl}`);
 }
 
 // Vanilla jar with the loader's files laid over it. The signatures have to go:

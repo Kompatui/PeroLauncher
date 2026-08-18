@@ -153,6 +153,10 @@ Pero-Launcher/
   **Убрать эту строку перед релизом.**
 - `main.js` и `preload.js` не перечитываются на лету — после их правки нужен
   полный перезапуск `npm start` (Ctrl+C и заново).
+- Если `npm start` падает с `Cannot read properties of undefined (reading 'setApplicationMenu')` —
+  в окружении выставлена `ELECTRON_RUN_AS_NODE=1`, и Electron стартует как обычный Node
+  (без окон, `app` и `Menu` не существуют). Лечится `unset ELECTRON_RUN_AS_NODE` перед запуском.
+  Так падает запуск из терминала Claude Code; в обычном PowerShell этой переменной нет.
 - Первый запуск Minecraft качает ~300-500 МБ; повторные запуски используют кэш.
 - Если Java не может выделить память при старте — снизить нижнюю границу (`min`).
   На этом уже падало с `insufficient memory` при `min: "2G"`.

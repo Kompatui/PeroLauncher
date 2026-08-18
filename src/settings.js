@@ -320,7 +320,7 @@ document.getElementById('row-version').addEventListener('click', async () => {
 const MOD_LOADERS = [
   { id: 'fabric', name: 'Fabric', ready: true },
   { id: 'quilt', name: 'Quilt', ready: true },
-  { id: 'forge', name: 'Forge', ready: false },
+  { id: 'forge', name: 'Forge', ready: true },
   { id: 'neoforge', name: 'NeoForge', ready: false }
 ];
 

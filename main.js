@@ -184,13 +184,18 @@ ipcMain.handle('launch-game', async (event, profile) => {
     opts.javaPath = settings.javaPath;
   }
 
-  // With a mod loader picked, the game starts from the loader profile, which
-  // sits on top of the vanilla version rather than replacing it.
-  if (settings.loader && settings.loader !== 'vanilla' && settings.loaderVersion) {
+  // The loader is fetched here rather than when it is picked, so browsing the
+  // list costs nothing. Both kinds sit on top of the vanilla version.
+  const loader = modLoaders[settings.loader];
+  if (loader && settings.loaderVersion) {
     try {
-      opts.version.custom = await installLoaderProfile(
-        settings.loader, settings.version, settings.loaderVersion, settings.gameFolder
-      );
+      if (loader.kind === 'profile') {
+        opts.version.custom = await installLoaderProfile(
+          settings.loader, settings.version, settings.loaderVersion, settings.gameFolder
+        );
+      } else {
+        opts.forge = await loader.ensureInstaller(settings.version, settings.loaderVersion);
+      }
     } catch (e) {
       return { started: false, error: `loader: ${e.message}` };
     }
@@ -306,15 +311,106 @@ ipcMain.handle('get-versions', async () => {
 // Mod loaders. Each entry knows how to list its builds for a game version and
 // how to put a launchable profile into versions/. Adding Quilt, Forge or
 // NeoForge later means adding an entry here, nothing else.
+// Two kinds exist. A 'profile' loader hands out a ready version json that is
+// dropped next to the vanilla versions. An 'installer' loader gives out an
+// installer jar that minecraft-launcher-core has to unpack itself.
 const modLoaders = {
   fabric: metaLoader('fabric', 'https://meta.fabricmc.net/v2'),
-  quilt: metaLoader('quilt', 'https://meta.quiltmc.org/v3')
+  quilt: metaLoader('quilt', 'https://meta.quiltmc.org/v3'),
+  forge: forgeLoader()
 };
+
+// Installer jars are kept beside the launcher, not in the game folder -
+// they are build tooling, not something the game reads.
+const loadersDir = 'E:\\PeroLauncher\\loaders';
+
+function forgeLoader() {
+  const maven = 'https://maven.minecraftforge.net/net/minecraftforge/forge';
+  const promosUrl = 'https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json';
+  let metadataCache = null;
+
+  return {
+    kind: 'installer',
+
+    async listVersions(mcVersion) {
+      if (!metadataCache) metadataCache = await fetchText(`${maven}/maven-metadata.xml`);
+      const all = [...metadataCache.matchAll(/<version>([^<]+)<\/version>/g)].map(m => m[1]);
+
+      // Exact prefix only: a plain startsWith on "1.21.1" would also swallow
+      // 1.21.10 and 1.21.11.
+      const prefix = `${mcVersion}-`;
+      const builds = all
+        .filter(v => v.startsWith(prefix))
+        .map(v => v.slice(prefix.length))
+        .filter(Boolean)
+        .sort(compareBuildNumbers)
+        .reverse();
+
+      let promos = {};
+      try {
+        promos = (await fetchJson(promosUrl)).promos || {};
+      } catch {
+        // The recommended mark is a nicety; the list works without it.
+      }
+      const recommended = promos[`${mcVersion}-recommended`];
+
+      return builds.map(version => ({
+        version,
+        // Old builds carry a trailing game version (10.13.4.1614-1.7.10)
+        // that the promotions file leaves out.
+        stable: !!recommended && (version === recommended || version.startsWith(`${recommended}-`))
+      }));
+    },
+
+    async ensureInstaller(mcVersion, loaderVersion) {
+      const build = `${mcVersion}-${loaderVersion}`;
+      const file = path.join(loadersDir, `forge-${build}-installer.jar`);
+      if (fs.existsSync(file)) return file;
+
+      const url = `${maven}/${build}/forge-${build}-installer.jar`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      fs.mkdirSync(loadersDir, { recursive: true });
+      fs.writeFileSync(file, Buffer.from(await response.arrayBuffer()));
+      return file;
+    }
+  };
+}
+
+// Maven lists builds in its own order, which is not the numeric one, so
+// 10.13.4.1614 could end up below 10.13.0.1150. Compare segment by segment.
+function compareBuildNumbers(a, b) {
+  const partsA = a.split(/[.-]/).map(Number);
+  const partsB = b.split(/[.-]/).map(Number);
+  for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+    const left = partsA[i];
+    const right = partsB[i];
+    if (Number.isNaN(left) || left === undefined) return -1;
+    if (Number.isNaN(right) || right === undefined) return 1;
+    if (left !== right) return left - right;
+  }
+  return 0;
+}
+
+async function fetchText(url) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.text();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 // Fabric and Quilt share the same meta API shape, so one description covers
 // both: list the builds for a game version, then hand out a ready profile.
 function metaLoader(name, baseUrl) {
   return {
+    kind: 'profile',
+
     async listVersions(mcVersion) {
       const list = await fetchJson(`${baseUrl}/versions/loader/${encodeURIComponent(mcVersion)}`);
       return list.map(entry => ({

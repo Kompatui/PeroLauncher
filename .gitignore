@@ -5,6 +5,7 @@ dist/
 # Local launcher data - never stored in git.
 # userdata holds the Microsoft auth session and must not be published.
 userdata/
+loaders/
 settings.json
 versions-cache.json
 

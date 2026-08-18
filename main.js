@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
+const AdmZip = require('adm-zip');
 const { Auth } = require('msmc');
 const { Client } = require('minecraft-launcher-core');
 
@@ -205,11 +206,17 @@ ipcMain.handle('launch-game', async (event, profile) => {
   const loader = modLoaders[settings.loader];
   if (loader && settings.loaderVersion) {
     try {
-      if (loader.kind === 'profile') {
+      const kind = loader.kindFor(settings.version);
+
+      if (kind === 'profile') {
         opts.version.custom = await installLoaderProfile(
           settings.loader, settings.version, settings.loaderVersion, settings.gameFolder
         );
-      } else if (loader.kind === 'installer-run') {
+      } else if (kind === 'jarmod') {
+        opts.version.custom = await loader.installJarMod(
+          settings.version, settings.loaderVersion, settings.gameFolder
+        );
+      } else if (kind === 'installer-run') {
         const profileId = loader.profileId(settings.version, settings.loaderVersion);
         const profileFile = path.join(settings.gameFolder, 'versions', profileId, `${profileId}.json`);
         // Running the installer takes minutes, so only do it once.
@@ -395,11 +402,14 @@ async function requiredJava(mcVersion) {
   }
   if (cache[mcVersion]) return cache[mcVersion];
 
-  const manifest = readVersionCache() || await fetchVersionManifest();
-  const entry = manifest.versions.find(version => version.id === mcVersion);
-  if (!entry) return LEGACY_JAVA;
+  let meta;
+  try {
+    meta = await versionMetadata(mcVersion);
+  } catch {
+    // A version Mojang does not list - a modded profile, most likely.
+    return LEGACY_JAVA;
+  }
 
-  const meta = await fetchJson(entry.url);
   const required = meta.javaVersion
     ? { component: meta.javaVersion.component, major: meta.javaVersion.majorVersion }
     : LEGACY_JAVA;
@@ -602,14 +612,17 @@ function forgeLoader() {
   }
 
   return {
-    kind: 'installer',
+    // Three eras, three ways in: the installer from 1.12, the universal jar
+    // from 1.6, and before that a jar mod pasted into the game itself.
+    kindFor(mcVersion) {
+      return forgeUsesJarMod(mcVersion) ? 'jarmod' : 'installer';
+    },
+
+    profileId(mcVersion, loaderVersion) {
+      return `${mcVersion}-forge-${loaderVersion}`;
+    },
 
     async listVersions(mcVersion) {
-      // Forge before 1.6 installed itself by patching minecraft.jar, so its
-      // archives carry no version.json and nothing here can launch them.
-      // Offering those builds would be a dead end.
-      if (!forgeCanLaunch(mcVersion)) return [];
-
       await metadata();
       const all = [...metadataCache.matchAll(/<version>([^<]+)<\/version>/g)].map(m => m[1]);
 
@@ -649,6 +662,41 @@ function forgeLoader() {
       fs.mkdirSync(loadersDir, { recursive: true });
       fs.writeFileSync(file, await fetchBuffer(url));
       return file;
+    },
+
+    // Builds the patched game jar and registers it as a version of its own,
+    // so the vanilla jar next to it stays untouched.
+    async installJarMod(mcVersion, loaderVersion, gameFolder) {
+      const profileId = this.profileId(mcVersion, loaderVersion);
+      const directory = path.join(gameFolder, 'versions', profileId);
+      const jarPath = path.join(directory, `${profileId}.jar`);
+      const jsonPath = path.join(directory, `${profileId}.json`);
+
+      if (fs.existsSync(jarPath) && fs.existsSync(jsonPath)) return profileId;
+
+      const meta = await versionMetadata(mcVersion);
+      const vanillaJar = await fetchBuffer(meta.downloads.client.url);
+      const modArchive = await this.fetchJarModArchive(`${mcVersion}-${loaderVersion}`);
+
+      fs.mkdirSync(directory, { recursive: true });
+      fs.writeFileSync(jarPath, buildJarMod(vanillaJar, modArchive));
+
+      // The vanilla description, renamed. Everything the loader adds already
+      // lives inside the patched jar, so nothing else has to be declared.
+      fs.writeFileSync(jsonPath, JSON.stringify({ ...meta, id: profileId }, null, 2));
+      return profileId;
+    },
+
+    // 1.4 and 1.5 call it universal.zip, 1.1 through 1.3 call it client.zip.
+    async fetchJarModArchive(build) {
+      for (const name of [`forge-${build}-universal.zip`, `forge-${build}-client.zip`]) {
+        try {
+          return await fetchBuffer(`${maven}/${build}/${name}`);
+        } catch (e) {
+          if (!/^HTTP 4\d\d$/.test(e.message)) throw e;
+        }
+      }
+      throw new Error('no universal or client archive published for this build');
     }
   };
 }
@@ -664,12 +712,46 @@ function forgeArtifactKind(mcVersion) {
   return Number(parts[1]) >= 12 ? 'installer' : 'universal';
 }
 
-// 1.5.2 and older keep no version.json in any of their archives - that era of
-// Forge installed itself by patching minecraft.jar, which nothing here does.
-function forgeCanLaunch(mcVersion) {
+// Before 1.6 there were no version profiles at all. Forge of that era was
+// installed by pasting its classes straight into minecraft.jar and deleting
+// the signatures - what people called a jar mod. Prism and MultiMC still do
+// exactly this, and it is the only way those versions run.
+function forgeUsesJarMod(mcVersion) {
   const parts = mcVersion.split('.');
-  if (parts[0] !== '1') return true;
-  return Number(parts[1]) >= 6;
+  if (parts[0] !== '1') return false;
+  return Number(parts[1]) < 6;
+}
+
+// Vanilla jar with the loader's files laid over it. The signatures have to go:
+// once a single class is replaced they no longer match, and the game refuses
+// to start rather than run a jar whose signature is broken.
+function buildJarMod(vanillaJar, modArchive) {
+  const patched = new AdmZip(vanillaJar);
+
+  // Collect first, delete after: removing entries while walking the same list
+  // makes the walk skip half of them, and the leftover signatures are exactly
+  // what stops the game from starting.
+  const signatures = patched.getEntries()
+    .map(entry => entry.entryName)
+    .filter(name => name.startsWith('META-INF/'));
+  for (const name of signatures) patched.deleteFile(name);
+
+  for (const entry of new AdmZip(modArchive).getEntries()) {
+    if (entry.isDirectory || entry.entryName.startsWith('META-INF/')) continue;
+    patched.deleteFile(entry.entryName);
+    patched.addFile(entry.entryName, entry.getData());
+  }
+
+  return patched.toBuffer();
+}
+
+// The full description of a game version, fetched from the address the
+// manifest gives for it.
+async function versionMetadata(mcVersion) {
+  const manifest = readVersionCache() || await fetchVersionManifest();
+  const entry = manifest.versions.find(version => version.id === mcVersion);
+  if (!entry) throw new Error(`unknown game version ${mcVersion}`);
+  return fetchJson(entry.url);
 }
 
 // NeoForge numbers its builds after the game version with the leading "1."
@@ -699,7 +781,9 @@ function neoforgeLoader() {
   }
 
   return {
-    kind: 'installer-run',
+    kindFor() {
+      return 'installer-run';
+    },
 
     async supports(mcVersion) {
       const prefix = neoforgeVersionPrefix(mcVersion);
@@ -807,7 +891,9 @@ async function urlExists(url) {
 // both: list the builds for a game version, then hand out a ready profile.
 function metaLoader(name, baseUrl) {
   return {
-    kind: 'profile',
+    kindFor() {
+      return 'profile';
+    },
 
     async listVersions(mcVersion) {
       const list = await fetchJson(`${baseUrl}/versions/loader/${encodeURIComponent(mcVersion)}`);

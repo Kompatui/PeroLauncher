@@ -4,7 +4,8 @@
   "description": "",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "check-loaders": "node scripts/check-loaders.js"
   },
   "keywords": [],
   "author": "",
@@ -14,6 +15,7 @@
     "electron": "^43.2.0"
   },
   "dependencies": {
+    "adm-zip": "^0.4.16",
     "minecraft-launcher-core": "^3.18.2",
     "msmc": "^4.1.0"
   }

@@ -64,16 +64,36 @@ function zipHasFile(buffer, name) {
 
 // Both rules mirror main.js. If they drift apart, this check stops meaning
 // anything - it is here to test what the launcher actually does.
+// Counts entries whose local header names a .class file.
+function countClassEntries(buffer) {
+  let count = 0;
+  let at = buffer.indexOf(Buffer.from('.class'));
+  while (at !== -1) {
+    // Walk back over the file name to where its local header would start.
+    for (let nameLength = 6; nameLength <= 200; nameLength++) {
+      const headerStart = at + 6 - nameLength - 30;
+      if (headerStart < 0) break;
+      if (buffer.readUInt32LE(headerStart) === 0x04034b50 &&
+          buffer.readUInt16LE(headerStart + 26) === nameLength) {
+        count++;
+        break;
+      }
+    }
+    at = buffer.indexOf(Buffer.from('.class'), at + 1);
+  }
+  return count;
+}
+
 function forgeArtifactKind(mcVersion) {
   const parts = mcVersion.split('.');
   if (parts[0] !== '1') return 'installer';
   return Number(parts[1]) >= 12 ? 'installer' : 'universal';
 }
 
-function forgeCanLaunch(mcVersion) {
+function forgeUsesJarMod(mcVersion) {
   const parts = mcVersion.split('.');
-  if (parts[0] !== '1') return true;
-  return Number(parts[1]) >= 6;
+  if (parts[0] !== '1') return false;
+  return Number(parts[1]) < 6;
 }
 
 function neoforgeVersionPrefix(mcVersion) {
@@ -139,9 +159,6 @@ async function checkMetaLoader(name, baseUrl, mcVersion) {
 }
 
 async function checkForge(mcVersion, metadata) {
-  // Not a failure: the launcher deliberately does not offer these.
-  if (!forgeCanLaunch(mcVersion)) return { state: 'absent', note: 'too old to launch, not offered' };
-
   const prefix = `${mcVersion}-`;
   const builds = [...metadata.matchAll(/<version>([^<]+)<\/version>/g)]
     .map(match => match[1])
@@ -152,9 +169,31 @@ async function checkForge(mcVersion, metadata) {
 
   if (!builds.length) return { state: 'absent' };
 
-  const build = `${mcVersion}-${builds[builds.length - 1]}`;
-  const kind = forgeArtifactKind(mcVersion);
+  const newest = builds[builds.length - 1];
+  const build = `${mcVersion}-${newest}`;
 
+  // Before 1.6 the launcher pastes the loader into the game jar itself, so
+  // what matters is that the archive exists and holds classes to paste.
+  if (forgeUsesJarMod(mcVersion)) {
+    for (const name of [`forge-${build}-universal.zip`, `forge-${build}-client.zip`]) {
+      let archive;
+      try {
+        archive = await getBuffer(`${FORGE_MAVEN}/${build}/${name}`);
+      } catch (e) {
+        if (e.fromServer) continue;
+        return { state: 'error', note: `${name}: ${e.message}` };
+      }
+      // A jar mod is a pile of class files to lay over the game. The earliest
+      // Forge builds are only that - no ModLoader, no FML, those came later.
+      const classes = countClassEntries(archive);
+      if (classes === 0) return { state: 'broken', note: `${name} holds no classes to overlay` };
+
+      return { state: 'ok', note: `${newest}, jar mod from ${name.split('-').pop()}, ${classes} classes` };
+    }
+    return { state: 'broken', note: 'no universal or client archive published' };
+  }
+
+  const kind = forgeArtifactKind(mcVersion);
   let jar;
   try {
     jar = await getBuffer(`${FORGE_MAVEN}/${build}/forge-${build}-${kind}.jar`);
@@ -167,7 +206,7 @@ async function checkForge(mcVersion, metadata) {
     return { state: 'broken', note: `${kind} jar has no version.json - try the ${other} jar` };
   }
 
-  return { state: 'ok', note: `${builds[builds.length - 1]}, ${kind} jar` };
+  return { state: 'ok', note: `${newest}, ${kind} jar` };
 }
 
 async function checkNeoforge(mcVersion, metadata) {

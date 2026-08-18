@@ -29,15 +29,10 @@
   "version.typeBeta": "beta",
   "version.typeAlpha": "alpha",
   "version.typeCustom": "custom build",
-  "settings.loader": "Mod loader",
   "loader.select": "Mod loader",
   "loader.vanilla": "No loader",
-  "loader.vanillaShort": "none",
   "loader.pickVersion": "Loader version",
-  "loader.loading": "Loading the build list…",
   "loader.stable": "stable",
-  "loader.unsupported": "This loader does not support the selected game version.",
-  "loader.soon": "soon",
   "filters.loadFromServer": "Load from server",
   "filters.mods": "Mods",
   "filters.alpha": "Alpha (2010)",
@@ -58,5 +53,7 @@
   "crash.outOfMemory": "The game ran out of memory while starting. Close other programs (browser, code editor) or lower the memory given to the game in the settings.",
   "crash.givenRam": "Given to the game",
   "crash.freeRam": "Free right now",
-  "crash.exitCode": "Exit code"
+  "crash.exitCode": "Exit code",
+  "loader.checking": "Checking which loaders exist for this version…",
+  "java.howItWorks": "Each game version needs its own Java. The launcher picks it automatically: if a matching one is already installed it is used, otherwise it is downloaded from Mojang, or from Adoptium when Mojang is unreachable. Downloaded runtimes are kept in the launcher folder and reused."
 }

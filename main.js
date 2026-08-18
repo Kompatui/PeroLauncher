@@ -278,17 +278,9 @@ function listInstalledVersions(gameFolder) {
 }
 
 async function fetchVersionManifest() {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10000);
-  try {
-    const response = await fetch(VERSION_MANIFEST_URL, { signal: controller.signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
-    fs.writeFileSync(versionsCachePath, JSON.stringify(data));
-    return data;
-  } finally {
-    clearTimeout(timeout);
-  }
+  const data = await fetchJson(VERSION_MANIFEST_URL);
+  fs.writeFileSync(versionsCachePath, JSON.stringify(data));
+  return data;
 }
 
 function readVersionCache() {
@@ -484,7 +476,49 @@ function sha1Of(file) {
   return crypto.createHash('sha1').update(fs.readFileSync(file)).digest('hex');
 }
 
-async function downloadJava(component) {
+// Mojang's runtimes are the ones the game is tested against, so they come
+// first. But their servers are not always reachable - during development they
+// timed out for an evening while every other service answered in 200 ms - and
+// a player with no Java would then be stuck with nothing at all. Adoptium
+// publishes the same OpenJDK builds and stays as the way out.
+async function downloadJava(component, major) {
+  try {
+    return await downloadMojangRuntime(component);
+  } catch (e) {
+    console.log('[JAVA] Mojang runtime unavailable, falling back to Adoptium:', e.message);
+    return await downloadAdoptiumRuntime(major);
+  }
+}
+
+async function downloadAdoptiumRuntime(major) {
+  const url = `https://api.adoptium.net/v3/binary/latest/${major}/ga/windows/x64/jre/hotspot/normal/eclipse`;
+  const target = path.join(javaDir, `adoptium-${major}`);
+  fs.mkdirSync(target, { recursive: true });
+
+  const archive = path.join(javaDir, `adoptium-${major}.zip`);
+  fs.writeFileSync(archive, await fetchBuffer(url, { redirect: 'follow' }));
+
+  // Windows-only project, so the shell's own unzip saves a dependency.
+  await runProcess('powershell', [
+    '-NoProfile', '-NonInteractive', '-Command',
+    `Expand-Archive -LiteralPath "${archive}" -DestinationPath "${target}" -Force`
+  ]);
+  fs.unlinkSync(archive);
+
+  const javaExe = adoptiumExeIn(target);
+  if (!javaExe) throw new Error('Adoptium archive unpacked without bin/java.exe');
+  return javaExe;
+}
+
+// The archive holds one folder named after the build, so look one level down.
+function adoptiumExeIn(target) {
+  if (!fs.existsSync(target)) return null;
+  return fs.readdirSync(target)
+    .map(name => path.join(target, name, 'bin', 'java.exe'))
+    .find(candidate => fs.existsSync(candidate)) || null;
+}
+
+async function downloadMojangRuntime(component) {
   const feed = await fetchJson(JAVA_RUNTIME_FEED);
   const platform = feed[runtimePlatform()] || feed['windows-x64'];
   const builds = platform[component];
@@ -510,9 +544,7 @@ async function downloadJava(component) {
       if (fs.existsSync(destination) && sha1Of(destination) === sha1) continue;
 
       fs.mkdirSync(path.dirname(destination), { recursive: true });
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`${name}: HTTP ${response.status}`);
-      fs.writeFileSync(destination, Buffer.from(await response.arrayBuffer()));
+      fs.writeFileSync(destination, await fetchBuffer(url));
 
       if (sha1Of(destination) !== sha1) throw new Error(`${name}: checksum mismatch`);
     }
@@ -532,12 +564,15 @@ async function resolveJavaPath(mcVersion, manualPath) {
   if (manualPath) return manualPath;
   const required = await requiredJava(mcVersion);
 
-  // Already fetched by us before - the surest match, and no scanning needed.
-  const ownRuntime = path.join(javaDir, required.component, 'bin', 'java.exe');
-  if (fs.existsSync(ownRuntime)) return ownRuntime;
+  // Already fetched by us before, from either source - the surest match.
+  const fromMojang = path.join(javaDir, required.component, 'bin', 'java.exe');
+  if (fs.existsSync(fromMojang)) return fromMojang;
+
+  const fromAdoptium = adoptiumExeIn(path.join(javaDir, `adoptium-${required.major}`));
+  if (fromAdoptium) return fromAdoptium;
 
   const installed = findSystemJavas().find(java => java.major === required.major);
-  return installed ? installed.path : downloadJava(required.component);
+  return installed ? installed.path : downloadJava(required.component, required.major);
 }
 
 ipcMain.handle('get-java-status', async (event, mcVersion) => {
@@ -561,11 +596,16 @@ function forgeLoader() {
   const promosUrl = 'https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json';
   let metadataCache = null;
 
+  async function metadata() {
+    if (!metadataCache) metadataCache = await fetchText(`${maven}/maven-metadata.xml`);
+    return metadataCache;
+  }
+
   return {
     kind: 'installer',
 
     async listVersions(mcVersion) {
-      if (!metadataCache) metadataCache = await fetchText(`${maven}/maven-metadata.xml`);
+      await metadata();
       const all = [...metadataCache.matchAll(/<version>([^<]+)<\/version>/g)].map(m => m[1]);
 
       // Exact prefix only: a plain startsWith on "1.21.1" would also swallow
@@ -600,11 +640,8 @@ function forgeLoader() {
       if (fs.existsSync(file)) return file;
 
       const url = `${maven}/${build}/forge-${build}-installer.jar`;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
       fs.mkdirSync(loadersDir, { recursive: true });
-      fs.writeFileSync(file, Buffer.from(await response.arrayBuffer()));
+      fs.writeFileSync(file, await fetchBuffer(url));
       return file;
     }
   };
@@ -631,12 +668,21 @@ function neoforgeLoader() {
   const maven = 'https://maven.neoforged.net/releases/net/neoforged/neoforge';
   let metadataCache = null;
 
+  async function allBuilds() {
+    if (!metadataCache) metadataCache = await fetchText(`${maven}/maven-metadata.xml`);
+    return [...metadataCache.matchAll(/<version>([^<]+)<\/version>/g)].map(m => m[1]);
+  }
+
   return {
     kind: 'installer-run',
 
+    async supports(mcVersion) {
+      const prefix = neoforgeVersionPrefix(mcVersion);
+      return (await allBuilds()).some(build => build.startsWith(prefix));
+    },
+
     async listVersions(mcVersion) {
-      if (!metadataCache) metadataCache = await fetchText(`${maven}/maven-metadata.xml`);
-      const all = [...metadataCache.matchAll(/<version>([^<]+)<\/version>/g)].map(m => m[1]);
+      const all = await allBuilds();
       const prefix = neoforgeVersionPrefix(mcVersion);
       return all
         .filter(version => version.startsWith(prefix))
@@ -653,10 +699,8 @@ function neoforgeLoader() {
       const file = path.join(loadersDir, `neoforge-${loaderVersion}-installer.jar`);
       if (!fs.existsSync(file)) {
         const url = `${maven}/${loaderVersion}/neoforge-${loaderVersion}-installer.jar`;
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         fs.mkdirSync(loadersDir, { recursive: true });
-        fs.writeFileSync(file, Buffer.from(await response.arrayBuffer()));
+        fs.writeFileSync(file, await fetchBuffer(url));
       }
 
       // The installer refuses to run without this file, and a folder that has
@@ -703,15 +747,11 @@ function compareBuildNumbers(a, b) {
 }
 
 async function fetchText(url) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
-  try {
-    const response = await fetch(url, { signal: controller.signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await response.text();
-  } finally {
-    clearTimeout(timeout);
-  }
+  return (await fetchWithRetry(url)).text();
+}
+
+async function fetchBuffer(url, options = {}) {
+  return Buffer.from(await (await fetchWithRetry(url, options)).arrayBuffer());
 }
 
 // Fabric and Quilt share the same meta API shape, so one description covers
@@ -738,16 +778,38 @@ function metaLoader(name, baseUrl) {
   };
 }
 
-async function fetchJson(url) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
-  try {
-    const response = await fetch(url, { signal: controller.signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await response.json();
-  } finally {
-    clearTimeout(timeout);
+// Connections here drop at random: the same host answers in 200 ms, then times
+// out, then answers again. One failed attempt means nothing, so every request
+// gets a few tries. A 4xx answer is the server talking, not the network, and
+// is not retried - that is how "this loader has nothing for this version" is
+// told apart from "the connection broke".
+async function fetchWithRetry(url, options = {}, attempts = 3) {
+  let lastError;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      if (response.ok) return response;
+      if (response.status >= 400 && response.status < 500) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      lastError = new Error(`HTTP ${response.status}`);
+    } catch (e) {
+      if (/^HTTP 4\d\d$/.test(e.message)) throw e;
+      lastError = e;
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (attempt < attempts) await new Promise(done => setTimeout(done, 1500));
   }
+
+  throw lastError;
+}
+
+async function fetchJson(url) {
+  return (await fetchWithRetry(url)).json();
 }
 
 // Writes the loader profile next to the vanilla versions. minecraft-launcher-core
@@ -770,6 +832,24 @@ async function installLoaderProfile(loaderId, mcVersion, loaderVersion, gameFold
   fs.writeFileSync(path.join(actualDir, `${actualId}.json`), JSON.stringify(profile, null, 2));
   return actualId;
 }
+
+// Asks every loader what it actually has for this game version, rather than
+// trusting a list of "supported versions". Slower, but the answer cannot be
+// stale - and the builds come back with it, so picking one needs no second
+// request. All four are asked at once.
+ipcMain.handle('get-available-loaders', async (event, mcVersion) => {
+  const checks = Object.entries(modLoaders).map(async ([id, loader]) => {
+    try {
+      const versions = await loader.listVersions(mcVersion);
+      return versions.length > 0 ? { id, versions } : null;
+    } catch {
+      // A loader with nothing for this version answers 400 or 404.
+      return null;
+    }
+  });
+
+  return (await Promise.all(checks)).filter(Boolean);
+});
 
 ipcMain.handle('get-loader-versions', async (event, loaderId, mcVersion) => {
   const loader = modLoaders[loaderId];

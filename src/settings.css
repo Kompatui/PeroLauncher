@@ -162,6 +162,17 @@
   color: #666;
 }
 
+/* Explains how something works rather than reporting state, so it is set
+   apart and kept narrow enough to stay readable. */
+.modal-note.explain {
+  max-width: 420px;
+  line-height: 1.45;
+  color: #777;
+  background: #f6f6f6;
+  padding: 10px 12px;
+  border-radius: 4px;
+}
+
 .modal-note.warn {
   color: #8a5a00;
   background: #fdf3e0;
@@ -266,8 +277,37 @@
   color: #999;
 }
 
-#row-loader { background: #ededed; }
-#row-loader:hover { background: #dcdcdc; }
+/* Sits at the right edge of the version row and appears only once a mod
+   loader is chosen - it is the way back into that choice. */
+.loader-badge {
+  position: absolute;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 4px;
+  background: #f0902a;
+  color: white;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.loader-badge:hover {
+  background: #d97b18;
+}
+
+.loader-badge.hidden {
+  display: none;
+}
+
+#row-version {
+  position: relative;
+}
 
 .back-btn {
   -webkit-app-region: no-drag;

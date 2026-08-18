@@ -64,14 +64,7 @@ function renderTranslatedValues() {
     settings.accountName || t('account.notSignedIn');
   document.getElementById('current-java').textContent =
     settings.javaPath || t('settings.javaAuto');
-  document.getElementById('current-loader').textContent = loaderSummary();
-}
-
-// "Fabric 0.19.3" when a loader is picked, the translated "none" otherwise.
-function loaderSummary() {
-  if (!settings.loader || settings.loader === 'vanilla') return t('loader.vanillaShort');
-  const name = MOD_LOADERS.find(l => l.id === settings.loader)?.name || settings.loader;
-  return settings.loaderVersion ? `${name} ${settings.loaderVersion}` : name;
+  renderLoaderBadge();
 }
 
 document.addEventListener('translations-applied', renderTranslatedValues);
@@ -304,8 +297,12 @@ document.getElementById('row-version').addEventListener('click', async () => {
       row.addEventListener('click', async () => {
         settings.version = row.dataset.id;
         document.getElementById('current-version').textContent = settings.version;
+        // The loader must belong to this game version, so the old choice is
+        // dropped and offered again - if there is anything to offer.
+        settings.loader = 'vanilla';
+        settings.loaderVersion = null;
         await saveSettings();
-        closeModal();
+        await pickLoaderForVersion(settings.version);
       });
     });
   }
@@ -315,14 +312,12 @@ document.getElementById('row-version').addEventListener('click', async () => {
   search.focus();
 });
 
-// Loaders are added one at a time; `ready: false` ones are listed but not
-// selectable yet, so the picker shows the whole picture instead of hiding it.
-const MOD_LOADERS = [
-  { id: 'fabric', name: 'Fabric', ready: true },
-  { id: 'quilt', name: 'Quilt', ready: true },
-  { id: 'forge', name: 'Forge', ready: true },
-  { id: 'neoforge', name: 'NeoForge', ready: true }
-];
+const MOD_LOADER_NAMES = {
+  fabric: 'Fabric',
+  quilt: 'Quilt',
+  forge: 'Forge',
+  neoforge: 'NeoForge'
+};
 
 function closeButtonHtml() {
   return `
@@ -336,35 +331,67 @@ function wireCloseButton() {
   document.getElementById('modal-cancel').addEventListener('click', closeModal);
 }
 
-async function pickLoaderVersion(loader) {
+// Step two of choosing a version. Every loader is asked what it really has for
+// this game version, and only those with something to offer are shown - no
+// entries that lead nowhere. When none of them support it, there is nothing to
+// decide, so the step is skipped instead of wasting a click.
+async function pickLoaderForVersion(mcVersion) {
   modalBox.innerHTML = `
-    <h3>${loader.name}</h3>
-    <p class="modal-note">${t('loader.loading')}</p>
+    <h3>${t('loader.select')}</h3>
+    <p class="modal-note">${t('loader.checking')}</p>
     ${closeButtonHtml()}
   `;
+  overlay.classList.remove('hidden');
   wireCloseButton();
 
-  const data = await window.api.getLoaderVersions(loader.id, settings.version);
+  const available = await window.api.getAvailableLoaders(mcVersion);
   if (overlay.classList.contains('hidden')) return;
 
-  if (data.error || data.versions.length === 0) {
-    modalBox.innerHTML = `
-      <h3>${loader.name}</h3>
-      <p class="modal-note warn">${t('loader.unsupported')}</p>
-      ${closeButtonHtml()}
-    `;
-    wireCloseButton();
+  if (available.length === 0) {
+    closeModal();
     return;
   }
 
   modalBox.innerHTML = `
-    <h3>${loader.name} — ${t('loader.pickVersion')}</h3>
+    <h3>${t('loader.select')}</h3>
+    <p class="modal-note">${t('settings.version')}: ${mcVersion}</p>
+    <div class="modal-lang-option current" data-loader="vanilla">${t('loader.vanilla')}</div>
+    ${available.map(entry => `
+      <div class="modal-lang-option" data-loader="${entry.id}">${MOD_LOADER_NAMES[entry.id]}</div>
+    `).join('')}
+    ${closeButtonHtml()}
+  `;
+  wireCloseButton();
+
+  modalBox.querySelectorAll('.modal-lang-option').forEach(option => {
+    option.addEventListener('click', async () => {
+      const loaderId = option.dataset.loader;
+      if (loaderId === 'vanilla') {
+        settings.loader = 'vanilla';
+        settings.loaderVersion = null;
+        renderLoaderBadge();
+        await saveSettings();
+        closeModal();
+        return;
+      }
+      // The builds arrived with the availability answer - no second request.
+      pickLoaderBuild(loaderId, available.find(entry => entry.id === loaderId).versions);
+    });
+  });
+}
+
+function pickLoaderBuild(loaderId, builds) {
+  const name = MOD_LOADER_NAMES[loaderId];
+
+  modalBox.innerHTML = `
+    <h3>${name} — ${t('loader.pickVersion')}</h3>
     <p class="modal-note">${t('settings.version')}: ${settings.version}</p>
     <div class="version-list" id="loader-list">
-      ${data.versions.map(v => `
-        <div class="version-row${v.version === settings.loaderVersion && settings.loader === loader.id ? ' current' : ''}" data-version="${v.version}">
-          <span class="version-id">${v.version}</span>
-          <span class="version-meta">${v.stable ? t('loader.stable') : ''}</span>
+      ${builds.map(build => `
+        <div class="version-row${build.version === settings.loaderVersion && settings.loader === loaderId ? ' current' : ''}"
+             data-version="${build.version}">
+          <span class="version-id">${build.version}</span>
+          <span class="version-meta">${build.stable ? t('loader.stable') : ''}</span>
         </div>
       `).join('')}
     </div>
@@ -376,50 +403,31 @@ async function pickLoaderVersion(loader) {
     row.addEventListener('click', async () => {
       // Only remembers the choice. The profile is fetched when the game is
       // actually launched, so browsing loaders leaves nothing on disk.
-      settings.loader = loader.id;
+      settings.loader = loaderId;
       settings.loaderVersion = row.dataset.version;
-      document.getElementById('current-loader').textContent = loaderSummary();
+      renderLoaderBadge();
       await saveSettings();
       closeModal();
     });
   });
 }
 
-document.getElementById('row-loader').addEventListener('click', () => {
-  const isVanilla = !settings.loader || settings.loader === 'vanilla';
+// The orange badge is both the marker that a loader is in use and the way back
+// into that choice, so it only exists while one is selected.
+function renderLoaderBadge() {
+  const badge = document.getElementById('edit-loader');
+  const hasLoader = settings.loader && settings.loader !== 'vanilla';
+  badge.classList.toggle('hidden', !hasLoader);
+  if (hasLoader) {
+    document.getElementById('current-loader').textContent =
+      `${MOD_LOADER_NAMES[settings.loader]} ${settings.loaderVersion || ''}`.trim();
+  }
+}
 
-  modalBox.innerHTML = `
-    <h3>${t('loader.select')}</h3>
-    <div class="modal-lang-option${isVanilla ? ' current' : ''}" data-loader="vanilla">
-      ${t('loader.vanilla')}
-    </div>
-    ${MOD_LOADERS.map(l => `
-      <div class="modal-lang-option${l.ready ? '' : ' disabled'}${settings.loader === l.id ? ' current' : ''}"
-           data-loader="${l.ready ? l.id : ''}">
-        ${l.name}${l.ready ? '' : ` <span class="loader-soon">${t('loader.soon')}</span>`}
-      </div>
-    `).join('')}
-    ${closeButtonHtml()}
-  `;
-  overlay.classList.remove('hidden');
-  wireCloseButton();
-
-  modalBox.querySelectorAll('.modal-lang-option').forEach(option => {
-    const loaderId = option.dataset.loader;
-    if (!loaderId) return;
-
-    option.addEventListener('click', async () => {
-      if (loaderId === 'vanilla') {
-        settings.loader = 'vanilla';
-        settings.loaderVersion = null;
-        document.getElementById('current-loader').textContent = loaderSummary();
-        await saveSettings();
-        closeModal();
-        return;
-      }
-      await pickLoaderVersion(MOD_LOADERS.find(l => l.id === loaderId));
-    });
-  });
+document.getElementById('edit-loader').addEventListener('click', (e) => {
+  // Otherwise the click also opens the version list behind it.
+  e.stopPropagation();
+  pickLoaderForVersion(settings.version);
 });
 
 document.getElementById('item-java').addEventListener('click', async () => {
@@ -442,6 +450,7 @@ document.getElementById('item-java').addEventListener('click', async () => {
   modalBox.innerHTML = `
     <h3>${t('settings.java')}</h3>
     <p class="modal-note">${t('java.requiredFor')} ${settings.version}: Java ${status.required ?? '?'}</p>
+    <p class="modal-note explain">${t('java.howItWorks')}</p>
 
     <div class="modal-lang-option${isAuto ? ' current' : ''}" data-java="auto">
       ${t('settings.javaAuto')}

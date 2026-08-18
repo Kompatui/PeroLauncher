@@ -29,15 +29,10 @@
   "version.typeBeta": "Beta",
   "version.typeAlpha": "Alpha",
   "version.typeCustom": "eigener Build",
-  "settings.loader": "Mod-Loader",
   "loader.select": "Mod-Loader",
   "loader.vanilla": "Kein Loader",
-  "loader.vanillaShort": "keiner",
   "loader.pickVersion": "Loader-Version",
-  "loader.loading": "Build-Liste wird geladen…",
   "loader.stable": "stabil",
-  "loader.unsupported": "Dieser Loader unterstützt die gewählte Spielversion nicht.",
-  "loader.soon": "bald",
   "filters.loadFromServer": "Vom Server laden",
   "filters.mods": "Mods",
   "filters.alpha": "Alpha (2010)",
@@ -58,5 +53,7 @@
   "crash.outOfMemory": "Dem Spiel ging beim Start der Speicher aus. Schließe andere Programme (Browser, Code-Editor) oder verringere den zugewiesenen Speicher in den Einstellungen.",
   "crash.givenRam": "Dem Spiel zugewiesen",
   "crash.freeRam": "Momentan frei",
-  "crash.exitCode": "Exit-Code"
+  "crash.exitCode": "Exit-Code",
+  "loader.checking": "Es wird geprüft, welche Loader es für diese Version gibt…",
+  "java.howItWorks": "Jede Spielversion benötigt ihr eigenes Java. Der Launcher wählt es selbst: Ist ein passendes bereits installiert, wird es verwendet, sonst wird es von Mojang heruntergeladen - und von Adoptium, wenn Mojang nicht erreichbar ist. Heruntergeladene Runtimes bleiben im Launcher-Ordner und werden wiederverwendet."
 }

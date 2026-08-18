@@ -28,11 +28,14 @@
     <div class="settings-row compact" id="row-version">
       <span class="settings-label" data-i18n="settings.version">Version</span>
       <span class="settings-value" id="current-version">—</span>
-    </div>
-
-    <div class="settings-row compact" id="row-loader">
-      <span class="settings-label" data-i18n="settings.loader">Mod loader</span>
-      <span class="settings-value" id="current-loader">—</span>
+      <button class="loader-badge hidden" id="edit-loader">
+        <span class="loader-badge-name" id="current-loader"></span>
+        <svg class="pencil" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <path d="M11.6 1.6a1.4 1.4 0 0 1 2 0l0.8 0.8a1.4 1.4 0 0 1 0 2l-7.3 7.3-3.1 0.8 0.8-3.1 7.3-7.3z"
+                fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+          <path d="M10.4 2.8l2.8 2.8" fill="none" stroke="currentColor" stroke-width="1.3"/>
+        </svg>
+      </button>
     </div>
 
     <div class="settings-row compact" id="row-account">

@@ -1,28 +1,28 @@
 # Pero Launcher
 
-Кастомный лаунчер Minecraft Java Edition на Electron.
+A custom Minecraft Java Edition launcher built with Electron. Windows only.
 
-## Что уже работает
-- Кастомный тайтлбар (frameless окно, кнопки свернуть/развернуть/закрыть в стиле Windows)
-- Плиточное главное меню (5 плиток)
-- Авторизация Microsoft (лицензионные аккаунты, msmc)
-- Скачивание и запуск Minecraft (minecraft-launcher-core)
-- Страница настроек: версия, аккаунт, ОЗУ (авто/ручной, лимит по реальной памяти),
-  Java/JRE, размер окна, папка игры, язык, фильтры версий
-- Система локализации (ru / en / de) через locales/*.json и атрибуты data-i18n
-- Настройки сохраняются в E:\PeroLauncher\settings.json, папка игры — E:\.minecraft
+## What already works
+- Custom titlebar (frameless window, minimize / maximize / close in Windows style)
+- Tile-based main menu (5 tiles)
+- Microsoft authentication (premium accounts, msmc)
+- Downloading and launching Minecraft (minecraft-launcher-core)
+- Settings page: version, account, RAM (auto / manual, capped by actual system memory),
+  Java/JRE, window size, game folder, language, version filters
+- Localization system (ru / en / de) via locales/*.json and data-i18n attributes
+- Settings are stored in E:\PeroLauncher\settings.json, game folder is E:\.minecraft
 
-## Установка после клонирования / восстановления
+## Setup after cloning / restoring
 ```
 npm install
 npm start
 ```
 
-## Что ещё не сделано
-- Красная плитка: браузер сборок/модов (Modrinth / CurseForge)
-- Белая плитка: показ ника и скина игрока
-- Менеджер версий (выбор версии из списка) и менеджер аккаунтов
-- Своя сборка с инкрементальными обновлениями по манифесту с хэшами
-- Автоматическая проверка/установка Java
-- Сборка в .exe через electron-builder
-- Универсальные пути вместо жёстко прописанного диска E
+## Not done yet
+- Red tile: modpack / mod browser (Modrinth / CurseForge)
+- White tile: player name and skin
+- Version manager (picking a version from the list) and account manager
+- Custom modpack with incremental updates based on a hash manifest
+- Automatic Java detection / installation
+- Packaging into an .exe via electron-builder
+- Portable paths instead of the hardcoded E: drive

@@ -9,7 +9,7 @@ Menu.setApplicationMenu(null);
 
 let currentLocale = 'ru';
 
-// Диск C не используем — на нём мало места. Всё хранится на E.
+// Drive C is off limits - it is short on space. Everything lives on E.
 app.setPath('userData', 'E:\\PeroLauncher\\userdata');
 
 const settingsPath = 'E:\\PeroLauncher\\settings.json';

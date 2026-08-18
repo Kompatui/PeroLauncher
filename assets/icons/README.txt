@@ -1,8 +1,8 @@
-Сюда положить свои иконки:
+Put your own icons here:
 
-logo.png      - логотип в тайтлбаре (20x20 и больше)
-folder.png    - жёлтая плитка (папка игры)
-mods.svg      - красная плитка (сборки/моды)
-play.png      - зелёная плитка (запуск)
-settings.png  - серая плитка (настройки)
-skin.png      - белая плитка (скин)
+logo.png      - titlebar logo (20x20 or larger)
+folder.png    - yellow tile (game folder)
+mods.svg      - red tile (modpacks / mods)
+play.png      - green tile (launch)
+settings.png  - grey tile (settings)
+skin.png      - white tile (player skin)

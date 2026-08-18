@@ -2,10 +2,11 @@ node_modules/
 dist/
 *.log
 
-# Локальные данные лаунчера — в git не хранятся.
-# userdata содержит сессию авторизации Microsoft, её публиковать нельзя.
+# Local launcher data - never stored in git.
+# userdata holds the Microsoft auth session and must not be published.
 userdata/
 settings.json
 
-# Локальные настройки Claude Code
+# Local tooling notes and settings
 .claude/
+CLAUDE.md

@@ -4,8 +4,8 @@ document.getElementById('btn-close').addEventListener('click', () => window.api.
 
 document.getElementById('tile-play').addEventListener('click', async () => {
   const profile = await window.api.loginMicrosoft();
-  console.log('Вошли как:', profile.name, profile.uuid);
-  console.log('Запускаем игру...');
+  console.log('Signed in as:', profile.name, profile.uuid);
+  console.log('Launching the game...');
   await window.api.launchGame(profile);
 });
 

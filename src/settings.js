@@ -32,10 +32,9 @@ async function loadSettingsUI() {
   totalSystemRamMB = await window.api.getSystemRam();
 
   document.getElementById('current-version').textContent = settings.version;
-  document.getElementById('current-account').textContent = settings.accountName || 'Не выполнен вход';
   document.getElementById('current-gamefolder').textContent = settings.gameFolder;
   document.getElementById('current-language').textContent = settings.language.toUpperCase();
-  document.getElementById('current-java').textContent = settings.javaPath ? settings.javaPath : 'Автоматически';
+  renderTranslatedValues();
 
   const slider = document.getElementById('ram-slider');
   const number = document.getElementById('ram-number');
@@ -56,6 +55,18 @@ async function loadSettingsUI() {
   document.getElementById('win-fullscreen').checked = settings.fullscreen;
   updateWindowSizeDisabledState();
 }
+
+// Values that are either user data or a translated placeholder.
+// Redrawn on every language switch, hence a function of its own.
+function renderTranslatedValues() {
+  if (!settings.language) return;
+  document.getElementById('current-account').textContent =
+    settings.accountName || t('account.notSignedIn');
+  document.getElementById('current-java').textContent =
+    settings.javaPath || t('settings.javaAuto');
+}
+
+document.addEventListener('translations-applied', renderTranslatedValues);
 
 function autoRamValue() {
   const half = Math.floor(totalSystemRamMB / 2);
@@ -138,35 +149,37 @@ overlay.addEventListener('click', (e) => {
   if (e.target === overlay) closeModal();
 });
 
-const versionFilterLabels = {
-  loadFromServer: 'Загружать с сервера',
-  mods: 'Модификации',
-  alpha: 'Альфа (2010 г.)',
-  experimental: 'Экспериментальные',
-  onlyInstalled: 'Только установленные',
-  snapshots: 'Снапшоты',
-  beta: 'Бета (2010-2011 гг.)',
-  launchers: 'Лаунчеры',
-  oldReleases: 'Релизы до 1.7.10'
-};
+// Order of the checkboxes in the version filter modal.
+// The captions live in locales/*.json under filters.*
+const versionFilterKeys = [
+  'loadFromServer',
+  'mods',
+  'alpha',
+  'experimental',
+  'onlyInstalled',
+  'snapshots',
+  'beta',
+  'launchers',
+  'oldReleases'
+];
 
 document.getElementById('item-versions').addEventListener('click', () => {
   let rowsHtml = '';
-  for (const key in versionFilterLabels) {
+  for (const key of versionFilterKeys) {
     const checked = settings.versionFilters[key] ? 'checked' : '';
     rowsHtml += `
       <label class="modal-checkbox-row">
         <input type="checkbox" data-key="${key}" ${checked}>
-        ${versionFilterLabels[key]}
+        ${t('filters.' + key)}
       </label>
     `;
   }
 
   modalBox.innerHTML = `
-    <h3>Показывать версии</h3>
+    <h3>${t('settings.showVersions')}</h3>
     ${rowsHtml}
     <div class="modal-buttons">
-      <button class="modal-btn-cancel" id="modal-cancel">Закрыть</button>
+      <button class="modal-btn-cancel" id="modal-cancel">${t('modal.close')}</button>
     </div>
   `;
   overlay.classList.remove('hidden');
@@ -201,7 +214,7 @@ document.getElementById('item-gamefolder').addEventListener('click', async () =>
 
 document.getElementById('item-language').addEventListener('click', () => {
   modalBox.innerHTML = `
-    <h3>Язык</h3>
+    <h3>${t('modal.language')}</h3>
     <div class="modal-lang-option" data-lang="ru">Русский</div>
     <div class="modal-lang-option" data-lang="en">English</div>
     <div class="modal-lang-option" data-lang="de">Deutsch</div>
@@ -212,11 +225,12 @@ document.getElementById('item-language').addEventListener('click', () => {
     opt.addEventListener('click', async () => {
       settings.language = opt.dataset.lang;
       document.getElementById('current-language').textContent = settings.language.toUpperCase();
-      await window.api.setLocale(settings.language);
+      await changeLanguage(settings.language);
       await saveSettings();
       closeModal();
     });
   });
 });
 
-loadSettingsUI();
+// Wait for the dictionary: the page draws captions through t().
+translationsReady.then(loadSettingsUI);

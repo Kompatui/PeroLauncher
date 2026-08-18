@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Pero Launcher — Настройки</title>
+  <title data-i18n="settings.pageTitle">Pero Launcher</title>
   <link rel="stylesheet" href="src/style.css">
   <link rel="stylesheet" href="src/settings.css">
 </head>
@@ -26,57 +26,57 @@
 
   <div class="settings-page">
     <div class="settings-row compact" id="row-version">
-      <span class="settings-label">Версия</span>
+      <span class="settings-label" data-i18n="settings.version">Version</span>
       <span class="settings-value" id="current-version">—</span>
     </div>
 
     <div class="settings-row compact" id="row-account">
-      <span class="settings-label">Аккаунт</span>
+      <span class="settings-label" data-i18n="settings.account">Account</span>
       <span class="settings-value" id="current-account">—</span>
     </div>
 
     <div class="settings-row compact full ram-row">
-      <span class="settings-label">Память (ОЗУ)</span>
+      <span class="settings-label" data-i18n="settings.memory">Memory (RAM)</span>
       <div class="ram-controls">
         <input type="range" id="ram-slider" min="1024" step="512">
         <input type="number" id="ram-number" step="512">
-        <span>МиБ</span>
+        <span data-i18n="settings.mib">MiB</span>
         <label class="auto-label">
-          <input type="checkbox" id="ram-auto"> Авто
+          <input type="checkbox" id="ram-auto"> <span data-i18n="settings.auto">Auto</span>
         </label>
       </div>
     </div>
 
     <div class="settings-list">
       <div class="settings-item value" id="item-versions">
-        <span class="settings-label">Показывать версии</span>
-        <span class="settings-value">Настроить</span>
+        <span class="settings-label" data-i18n="settings.showVersions">Show versions</span>
+        <span class="settings-value" data-i18n="settings.configure">Configure</span>
       </div>
 
       <div class="settings-item value" id="item-java">
-        <span class="settings-label">Java / JRE</span>
-        <span class="settings-value" id="current-java">Автоматически</span>
+        <span class="settings-label" data-i18n="settings.java">Java / JRE</span>
+        <span class="settings-value" id="current-java">—</span>
       </div>
 
       <div class="settings-item windowsize-item">
-        <span class="settings-label">Размер окна</span>
+        <span class="settings-label" data-i18n="settings.windowSize">Window size</span>
         <div class="windowsize-controls">
           <input type="number" id="win-w" style="width:70px">
           <span>x</span>
           <input type="number" id="win-h" style="width:70px">
           <label class="auto-label">
-            <input type="checkbox" id="win-fullscreen"> Весь экран
+            <input type="checkbox" id="win-fullscreen"> <span data-i18n="settings.fullscreen">Fullscreen</span>
           </label>
         </div>
       </div>
 
       <div class="settings-item value" id="item-gamefolder">
-        <span class="settings-label">Папка игры</span>
+        <span class="settings-label" data-i18n="settings.gameFolder">Game folder</span>
         <span class="settings-value" id="current-gamefolder">—</span>
       </div>
 
       <div class="settings-item value" id="item-language">
-        <span class="settings-label">Язык</span>
+        <span class="settings-label" data-i18n="settings.language">Language</span>
         <span class="settings-value" id="current-language">—</span>
       </div>
     </div>

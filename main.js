@@ -7,6 +7,7 @@ const { Client } = require('minecraft-launcher-core');
 
 Menu.setApplicationMenu(null);
 
+// Set from settings.json at startup, see below - the file is read there.
 let currentLocale = 'ru';
 
 // Drive C is off limits - it is short on space. Everything lives on E.
@@ -56,6 +57,10 @@ function loadSettings() {
 function saveSettingsToDisk(settings) {
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 }
+
+// Without this the launcher would fall back to Russian on every restart,
+// no matter what language the user picked in the settings.
+currentLocale = loadSettings().language || 'ru';
 
 function loadTranslations(lang) {
   const filePath = path.join(__dirname, 'locales', `${lang}.json`);

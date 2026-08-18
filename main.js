@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
+const crypto = require('crypto');
 const { Auth } = require('msmc');
 const { Client } = require('minecraft-launcher-core');
 
@@ -181,8 +182,12 @@ ipcMain.handle('launch-game', async (event, profile) => {
     }
   };
 
-  if (settings.javaPath) {
-    opts.javaPath = settings.javaPath;
+  // Picking the wrong Java is what silently kills the game: Forge for 1.20
+  // dies on Java 25 with "Unsupported class file major version 69".
+  try {
+    opts.javaPath = await resolveJavaPath(settings.version, settings.javaPath);
+  } catch (e) {
+    return { started: false, error: `java: ${e.message}` };
   }
 
   // The loader is fetched here rather than when it is picked, so browsing the
@@ -199,7 +204,8 @@ ipcMain.handle('launch-game', async (event, profile) => {
         const profileFile = path.join(settings.gameFolder, 'versions', profileId, `${profileId}.json`);
         // Running the installer takes minutes, so only do it once.
         if (!fs.existsSync(profileFile)) {
-          await loader.install(settings.version, settings.loaderVersion, settings.gameFolder, settings.javaPath);
+          // Same runtime the game will use, not whatever java is on PATH.
+          await loader.install(settings.version, settings.loaderVersion, settings.gameFolder, opts.javaPath);
         }
         opts.version.custom = profileId;
       } else {
@@ -334,6 +340,180 @@ const modLoaders = {
 // they are build tooling, not something the game reads.
 const loadersDir = 'E:\\PeroLauncher\\loaders';
 
+// Java runtimes the launcher downloads itself, plus a small note of which
+// Java each game version asks for, so we do not refetch that every launch.
+const javaDir = 'E:\\PeroLauncher\\java';
+const javaRequirementsPath = 'E:\\PeroLauncher\\java-versions.json';
+
+// Every version json names the runtime it expects, both as a component
+// ("java-runtime-gamma") and a plain major number. Versions older than 1.17
+// leave the field out - those run on Java 8.
+const LEGACY_JAVA = { component: 'jre-legacy', major: 8 };
+
+async function requiredJava(mcVersion) {
+  let cache = {};
+  if (fs.existsSync(javaRequirementsPath)) {
+    try {
+      cache = JSON.parse(fs.readFileSync(javaRequirementsPath, 'utf-8'));
+    } catch {
+      cache = {};
+    }
+  }
+  if (cache[mcVersion]) return cache[mcVersion];
+
+  const manifest = readVersionCache() || await fetchVersionManifest();
+  const entry = manifest.versions.find(version => version.id === mcVersion);
+  if (!entry) return LEGACY_JAVA;
+
+  const meta = await fetchJson(entry.url);
+  const required = meta.javaVersion
+    ? { component: meta.javaVersion.component, major: meta.javaVersion.majorVersion }
+    : LEGACY_JAVA;
+
+  cache[mcVersion] = required;
+  fs.writeFileSync(javaRequirementsPath, JSON.stringify(cache, null, 2));
+  return required;
+}
+
+// "17.0.7" -> 17, and the old "1.8.0_481" -> 8.
+function javaMajorFromVersion(text) {
+  const parts = text.replace(/"/g, '').trim().split('.');
+  return parts[0] === '1' ? parseInt(parts[1], 10) : parseInt(parts[0], 10);
+}
+
+function javaMajorAt(home) {
+  const releaseFile = path.join(home, 'release');
+  if (!fs.existsSync(releaseFile)) return null;
+  const match = fs.readFileSync(releaseFile, 'utf-8').match(/^JAVA_VERSION="?([^"\r\n]+)"?/m);
+  return match ? javaMajorFromVersion(match[1]) : null;
+}
+
+// Looks where Java installers usually put things, plus our own folder.
+function findSystemJavas() {
+  const roots = [
+    'C:\\Program Files\\Eclipse Adoptium',
+    'C:\\Program Files\\Java',
+    'C:\\Program Files\\Microsoft',
+    'C:\\Program Files (x86)\\Java',
+    'C:\\Program Files\\Amazon Corretto',
+    'C:\\Program Files\\Zulu',
+    javaDir
+  ];
+
+  const found = [];
+  const seen = new Set();
+
+  for (const root of roots) {
+    if (!fs.existsSync(root)) continue;
+    let entries = [];
+    try {
+      entries = fs.readdirSync(root, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const home = path.join(root, entry.name);
+      const exe = path.join(home, 'bin', 'java.exe');
+      if (!fs.existsSync(exe)) continue;
+      const major = javaMajorAt(home);
+      if (!major || seen.has(exe)) continue;
+      seen.add(exe);
+      found.push({ path: exe, major, home, downloaded: home.startsWith(javaDir) });
+    }
+  }
+
+  return found.sort((a, b) => a.major - b.major);
+}
+
+// The same runtimes the official launcher installs. Each component is a list
+// of files with their own sha1, so a half-finished download resumes cleanly
+// and a corrupted file is replaced instead of silently breaking the game.
+const JAVA_RUNTIME_FEED =
+  'https://piston-meta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json';
+
+function runtimePlatform() {
+  if (process.arch === 'arm64') return 'windows-arm64';
+  if (process.arch === 'ia32') return 'windows-x86';
+  return 'windows-x64';
+}
+
+function sha1Of(file) {
+  return crypto.createHash('sha1').update(fs.readFileSync(file)).digest('hex');
+}
+
+async function downloadJava(component) {
+  const feed = await fetchJson(JAVA_RUNTIME_FEED);
+  const platform = feed[runtimePlatform()] || feed['windows-x64'];
+  const builds = platform[component];
+  if (!builds || builds.length === 0) throw new Error(`no ${component} runtime for this system`);
+
+  const files = (await fetchJson(builds[0].manifest.url)).files;
+  const target = path.join(javaDir, component);
+
+  for (const [name, entry] of Object.entries(files)) {
+    if (entry.type === 'directory') fs.mkdirSync(path.join(target, name), { recursive: true });
+  }
+
+  const downloads = Object.entries(files).filter(([, entry]) => entry.type === 'file');
+  let index = 0;
+
+  async function worker() {
+    while (index < downloads.length) {
+      const [name, entry] = downloads[index++];
+      const destination = path.join(target, name);
+      const { url, sha1 } = entry.downloads.raw;
+
+      // Already there and intact - skip it. This is what makes a retry cheap.
+      if (fs.existsSync(destination) && sha1Of(destination) === sha1) continue;
+
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`${name}: HTTP ${response.status}`);
+      fs.writeFileSync(destination, Buffer.from(await response.arrayBuffer()));
+
+      if (sha1Of(destination) !== sha1) throw new Error(`${name}: checksum mismatch`);
+    }
+  }
+
+  await Promise.all(Array.from({ length: 8 }, worker));
+
+  const javaExe = path.join(target, 'bin', 'java.exe');
+  if (!fs.existsSync(javaExe)) throw new Error('runtime unpacked without bin/java.exe');
+  return javaExe;
+}
+
+// Manual choice wins. Otherwise match the game's own requirement, and fetch
+// the runtime when the machine has nothing suitable - which is the normal
+// case for someone who has never installed Java.
+async function resolveJavaPath(mcVersion, manualPath) {
+  if (manualPath) return manualPath;
+  const required = await requiredJava(mcVersion);
+
+  // Already fetched by us before - the surest match, and no scanning needed.
+  const ownRuntime = path.join(javaDir, required.component, 'bin', 'java.exe');
+  if (fs.existsSync(ownRuntime)) return ownRuntime;
+
+  const installed = findSystemJavas().find(java => java.major === required.major);
+  return installed ? installed.path : downloadJava(required.component);
+}
+
+ipcMain.handle('get-java-status', async (event, mcVersion) => {
+  try {
+    const { major } = await requiredJava(mcVersion);
+    const installed = findSystemJavas();
+    return {
+      required: major,
+      installed: installed.map(({ path: javaPath, major: javaMajor, downloaded }) =>
+        ({ path: javaPath, major: javaMajor, downloaded })),
+      matched: installed.find(java => java.major === major)?.path || null,
+      error: null
+    };
+  } catch (e) {
+    return { required: null, installed: [], matched: null, error: e.message };
+  }
+});
+
 function forgeLoader() {
   const maven = 'https://maven.minecraftforge.net/net/minecraftforge/forge';
   const promosUrl = 'https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json';
@@ -445,22 +625,22 @@ function neoforgeLoader() {
         fs.writeFileSync(profilesFile, JSON.stringify({ profiles: {}, version: 3 }, null, 2));
       }
 
-      await runJava(javaPath, ['-jar', file, '--install-client', gameFolder]);
+      await runProcess(javaPath || 'java', ['-jar', file, '--install-client', gameFolder]);
       return this.profileId(mcVersion, loaderVersion);
     }
   };
 }
 
-function runJava(javaPath, args) {
+function runProcess(command, args) {
   return new Promise((resolve, reject) => {
-    const child = spawn(javaPath || 'java', args);
+    const child = spawn(command, args);
     let output = '';
     child.stdout.on('data', chunk => { output += chunk; });
     child.stderr.on('data', chunk => { output += chunk; });
     child.on('error', reject);
     child.on('close', code => {
       if (code === 0) return resolve(output);
-      reject(new Error(`installer exited with ${code}: ${output.trim().split('\n').pop()}`));
+      reject(new Error(`exited with ${code}: ${output.trim().split('\n').pop()}`));
     });
   });
 }

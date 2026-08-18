@@ -46,5 +46,11 @@
   "filters.snapshots": "Snapshots",
   "filters.beta": "Beta (2010-2011)",
   "filters.launchers": "Launchers",
-  "filters.oldReleases": "Releases before 1.7.10"
+  "filters.oldReleases": "Releases before 1.7.10",
+  "java.checking": "Checking which Java is needed…",
+  "java.requiredFor": "For version",
+  "java.foundInSystem": "found on this machine",
+  "java.willDownload": "not found, will be downloaded on launch",
+  "java.downloadedByLauncher": "downloaded by the launcher",
+  "java.browse": "Pick a file manually…"
 }

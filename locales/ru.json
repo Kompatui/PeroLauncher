@@ -46,5 +46,11 @@
   "filters.snapshots": "Снапшоты",
   "filters.beta": "Бета (2010-2011 гг.)",
   "filters.launchers": "Лаунчеры",
-  "filters.oldReleases": "Релизы до 1.7.10"
+  "filters.oldReleases": "Релизы до 1.7.10",
+  "java.checking": "Проверяем, какая Java нужна…",
+  "java.requiredFor": "Для версии",
+  "java.foundInSystem": "найдена в системе",
+  "java.willDownload": "не найдена, будет скачана при запуске",
+  "java.downloadedByLauncher": "скачана лаунчером",
+  "java.browse": "Указать файл вручную…"
 }

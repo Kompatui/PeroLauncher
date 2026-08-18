@@ -18,5 +18,6 @@ contextBridge.exposeInMainWorld('api', {
   pickJava: () => ipcRenderer.invoke('pick-java'),
   getSystemRam: () => ipcRenderer.invoke('get-system-ram'),
   getVersions: () => ipcRenderer.invoke('get-versions'),
-  getLoaderVersions: (loader, mcVersion) => ipcRenderer.invoke('get-loader-versions', loader, mcVersion)
+  getLoaderVersions: (loader, mcVersion) => ipcRenderer.invoke('get-loader-versions', loader, mcVersion),
+  getJavaStatus: (mcVersion) => ipcRenderer.invoke('get-java-status', mcVersion)
 });

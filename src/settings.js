@@ -423,12 +423,60 @@ document.getElementById('row-loader').addEventListener('click', () => {
 });
 
 document.getElementById('item-java').addEventListener('click', async () => {
-  const javaPath = await window.api.pickJava();
-  if (javaPath) {
-    settings.javaPath = javaPath;
-    document.getElementById('current-java').textContent = javaPath;
-    await saveSettings();
-  }
+  modalBox.innerHTML = `
+    <h3>${t('settings.java')}</h3>
+    <p class="modal-note">${t('java.checking')}</p>
+    ${closeButtonHtml()}
+  `;
+  overlay.classList.remove('hidden');
+  wireCloseButton();
+
+  const status = await window.api.getJavaStatus(settings.version);
+  if (overlay.classList.contains('hidden')) return;
+
+  const isAuto = !settings.javaPath;
+  const autoHint = status.matched
+    ? `${t('java.foundInSystem')} — Java ${status.required}`
+    : `${t('java.willDownload')} — Java ${status.required}`;
+
+  modalBox.innerHTML = `
+    <h3>${t('settings.java')}</h3>
+    <p class="modal-note">${t('java.requiredFor')} ${settings.version}: Java ${status.required ?? '?'}</p>
+
+    <div class="modal-lang-option${isAuto ? ' current' : ''}" data-java="auto">
+      ${t('settings.javaAuto')}
+      <div class="java-hint">${autoHint}</div>
+    </div>
+
+    ${status.installed.map(java => `
+      <div class="modal-lang-option${settings.javaPath === java.path ? ' current' : ''}" data-java="${java.path}">
+        Java ${java.major}${java.downloaded ? ` <span class="loader-soon">${t('java.downloadedByLauncher')}</span>` : ''}
+        <div class="java-hint">${java.path}</div>
+      </div>
+    `).join('')}
+
+    <div class="modal-lang-option" data-java="browse">${t('java.browse')}</div>
+    ${closeButtonHtml()}
+  `;
+  wireCloseButton();
+
+  modalBox.querySelectorAll('.modal-lang-option').forEach(option => {
+    option.addEventListener('click', async () => {
+      const choice = option.dataset.java;
+
+      if (choice === 'browse') {
+        const picked = await window.api.pickJava();
+        if (!picked) return;
+        settings.javaPath = picked;
+      } else {
+        settings.javaPath = choice === 'auto' ? null : choice;
+      }
+
+      renderTranslatedValues();
+      await saveSettings();
+      closeModal();
+    });
+  });
 });
 
 document.getElementById('item-gamefolder').addEventListener('click', async () => {

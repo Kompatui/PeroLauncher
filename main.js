@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, Menu, shell, dialog } = require('electron')
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { spawn } = require('child_process');
 const { Auth } = require('msmc');
 const { Client } = require('minecraft-launcher-core');
 
@@ -193,6 +194,14 @@ ipcMain.handle('launch-game', async (event, profile) => {
         opts.version.custom = await installLoaderProfile(
           settings.loader, settings.version, settings.loaderVersion, settings.gameFolder
         );
+      } else if (loader.kind === 'installer-run') {
+        const profileId = loader.profileId(settings.version, settings.loaderVersion);
+        const profileFile = path.join(settings.gameFolder, 'versions', profileId, `${profileId}.json`);
+        // Running the installer takes minutes, so only do it once.
+        if (!fs.existsSync(profileFile)) {
+          await loader.install(settings.version, settings.loaderVersion, settings.gameFolder, settings.javaPath);
+        }
+        opts.version.custom = profileId;
       } else {
         opts.forge = await loader.ensureInstaller(settings.version, settings.loaderVersion);
       }
@@ -317,7 +326,8 @@ ipcMain.handle('get-versions', async () => {
 const modLoaders = {
   fabric: metaLoader('fabric', 'https://meta.fabricmc.net/v2'),
   quilt: metaLoader('quilt', 'https://meta.quiltmc.org/v3'),
-  forge: forgeLoader()
+  forge: forgeLoader(),
+  neoforge: neoforgeLoader()
 };
 
 // Installer jars are kept beside the launcher, not in the game folder -
@@ -376,6 +386,83 @@ function forgeLoader() {
       return file;
     }
   };
+}
+
+// NeoForge numbers its builds after the game version with the leading "1."
+// dropped: 1.21.1 -> 21.1.x, 1.21 -> 21.0.x. The newer game numbering keeps
+// all its parts: 26.2 -> 26.2.0.x.
+function neoforgeVersionPrefix(mcVersion) {
+  const parts = mcVersion.split('.');
+  if (parts[0] === '1') {
+    const [, minor, patch] = parts;
+    return `${minor}.${patch ?? 0}.`;
+  }
+  const [major, minor, patch] = parts;
+  return `${major}.${minor}.${patch ?? 0}.`;
+}
+
+// NeoForge cannot go through the Forge path: minecraft-launcher-core looks for
+// libraries named net.minecraftforge, and NeoForge publishes under
+// net.neoforged. Instead its installer is run once and leaves behind a normal
+// profile, which is then launched the same way Fabric is.
+function neoforgeLoader() {
+  const maven = 'https://maven.neoforged.net/releases/net/neoforged/neoforge';
+  let metadataCache = null;
+
+  return {
+    kind: 'installer-run',
+
+    async listVersions(mcVersion) {
+      if (!metadataCache) metadataCache = await fetchText(`${maven}/maven-metadata.xml`);
+      const all = [...metadataCache.matchAll(/<version>([^<]+)<\/version>/g)].map(m => m[1]);
+      const prefix = neoforgeVersionPrefix(mcVersion);
+      return all
+        .filter(version => version.startsWith(prefix))
+        .sort(compareBuildNumbers)
+        .reverse()
+        .map(version => ({ version, stable: !/alpha|beta|rc|snapshot/i.test(version) }));
+    },
+
+    profileId(mcVersion, loaderVersion) {
+      return `neoforge-${loaderVersion}`;
+    },
+
+    async install(mcVersion, loaderVersion, gameFolder, javaPath) {
+      const file = path.join(loadersDir, `neoforge-${loaderVersion}-installer.jar`);
+      if (!fs.existsSync(file)) {
+        const url = `${maven}/${loaderVersion}/neoforge-${loaderVersion}-installer.jar`;
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        fs.mkdirSync(loadersDir, { recursive: true });
+        fs.writeFileSync(file, Buffer.from(await response.arrayBuffer()));
+      }
+
+      // The installer refuses to run without this file, and a folder that has
+      // never been opened by the official launcher does not have one.
+      const profilesFile = path.join(gameFolder, 'launcher_profiles.json');
+      if (!fs.existsSync(profilesFile)) {
+        fs.mkdirSync(gameFolder, { recursive: true });
+        fs.writeFileSync(profilesFile, JSON.stringify({ profiles: {}, version: 3 }, null, 2));
+      }
+
+      await runJava(javaPath, ['-jar', file, '--install-client', gameFolder]);
+      return this.profileId(mcVersion, loaderVersion);
+    }
+  };
+}
+
+function runJava(javaPath, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(javaPath || 'java', args);
+    let output = '';
+    child.stdout.on('data', chunk => { output += chunk; });
+    child.stderr.on('data', chunk => { output += chunk; });
+    child.on('error', reject);
+    child.on('close', code => {
+      if (code === 0) return resolve(output);
+      reject(new Error(`installer exited with ${code}: ${output.trim().split('\n').pop()}`));
+    });
+  });
 }
 
 // Maven lists builds in its own order, which is not the numeric one, so

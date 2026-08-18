@@ -321,7 +321,7 @@ const MOD_LOADERS = [
   { id: 'fabric', name: 'Fabric', ready: true },
   { id: 'quilt', name: 'Quilt', ready: true },
   { id: 'forge', name: 'Forge', ready: true },
-  { id: 'neoforge', name: 'NeoForge', ready: false }
+  { id: 'neoforge', name: 'NeoForge', ready: true }
 ];
 
 function closeButtonHtml() {

@@ -273,6 +273,45 @@ function reportGameCrash(code, output, effectiveRam) {
   });
 }
 
+const PLAIN_VERSION = /^\d+(\.\d+)*$/;
+
+// Mojang files nine real releases as snapshots - 1.3, 1.4, 1.4.1, 1.4.3, 1.5,
+// 1.6, 1.6.3, 1.7 and 1.7.1. They were public releases at the time, and hiding
+// them behind the snapshot filter makes them look like they never existed.
+function correctedType(version) {
+  if (version.type === 'snapshot' && PLAIN_VERSION.test(version.id)) return 'release';
+  return version.type;
+}
+
+function compareVersionNumbers(a, b) {
+  const left = a.split('.').map(Number);
+  const right = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(left.length, right.length); i++) {
+    const one = left[i] ?? 0;
+    const other = right[i] ?? 0;
+    if (one !== other) return one - other;
+  }
+  return 0;
+}
+
+// Release times of old versions are rounded to the day, so 1.4.5 and 1.4.6
+// share a timestamp and come out of the manifest in the wrong order. Runs that
+// are entirely plain version numbers get sorted properly; anything mixed with
+// snapshots is left as Mojang has it, since there the order is a real answer.
+function fixSameDayOrder(versions) {
+  let start = 0;
+  for (let i = 1; i <= versions.length; i++) {
+    if (i < versions.length && versions[i].releaseTime === versions[start].releaseTime) continue;
+
+    const run = versions.slice(start, i);
+    if (run.length > 1 && run.every(version => PLAIN_VERSION.test(version.id))) {
+      run.sort((a, b) => compareVersionNumbers(b.id, a.id));
+      versions.splice(start, run.length, ...run);
+    }
+    start = i;
+  }
+}
+
 // A version counts as installed when its folder holds a matching .json,
 // which is what minecraft-launcher-core needs to start it.
 function listInstalledVersions(gameFolder) {
@@ -332,12 +371,13 @@ ipcMain.handle('get-versions', async () => {
     for (const version of manifest.versions) {
       versions.push({
         id: version.id,
-        type: version.type,
+        type: correctedType(version),
         releaseTime: version.releaseTime,
         installed: installed.includes(version.id),
         custom: false
       });
     }
+    fixSameDayOrder(versions);
   }
 
   // Anything installed that Mojang does not list is a modded or custom build

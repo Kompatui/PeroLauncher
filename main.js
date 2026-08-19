@@ -41,6 +41,10 @@ const defaultSettings = {
   gameFolder: 'E:\\.minecraft',
   language: 'ru',
   javaPath: null,
+  javaArgs: '',
+  // What the launcher does with itself once the game is up: get out of the
+  // way, stay put, or quit. Minimising is what a launcher is expected to do.
+  onGameStart: 'minimize',
   versionFilters: {
     loadFromServer: true,
     mods: true,
@@ -517,6 +521,13 @@ ipcMain.handle('launch-game', async (event, profile) => {
     console.log('Could not swap the config folder:', e.message);
   }
 
+  // Whatever the player typed goes on last, so it wins over what the launcher
+  // worked out - that is the point of being able to type it.
+  const extraArgs = String(settings.javaArgs || '').trim();
+  if (extraArgs) {
+    opts.customArgs = [...(opts.customArgs || []), ...extraArgs.split(/\s+/)];
+  }
+
   launcher.launch(opts);
 
   launcher.on('debug', (e) => console.log('[DEBUG]', e));
@@ -534,12 +545,144 @@ ipcMain.handle('launch-game', async (event, profile) => {
   // its memory back, and the figure would look like there was plenty.
   const freeAtLaunch = Math.floor(os.freemem() / 1024 / 1024);
 
+  // Getting out of the way, but only once the game is actually on screen -
+  // minimising while it is still downloading would leave the player looking
+  // at an empty desktop with no sign that anything is happening.
+  const launcherWindow = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+  let steppedAside = false;
+
+  launcher.on('data', () => {
+    if (steppedAside || !launcherWindow || launcherWindow.isDestroyed()) return;
+    steppedAside = true;
+
+    if (settings.onGameStart === 'minimize') launcherWindow.minimize();
+    else if (settings.onGameStart === 'close') app.quit();
+  });
+
   launcher.on('close', (code) => {
+    // Back where it was. A crash is exactly when the launcher is wanted
+    // again, so this happens before the report below.
+    if (settings.onGameStart === 'minimize' && launcherWindow && !launcherWindow.isDestroyed()) {
+      launcherWindow.restore();
+      launcherWindow.focus();
+    }
+
     if (code === 0) return;
     reportGameCrash(code, recentOutput.join('\n'), effectiveRam, freeAtLaunch);
   });
 
   return { started: true, error: null };
+});
+
+// Minecraft writes its own account of a crash here, and it says far more than
+// the last lines of output ever can.
+ipcMain.handle('open-crash-reports', () => {
+  const settings = loadSettings();
+  const reports = path.join(settings.gameFolder, 'crash-reports');
+  shell.openPath(fs.existsSync(reports) ? reports : settings.gameFolder);
+});
+
+// Two different things write a report when the game dies, and a player has no
+// reason to know the difference: the game writes crash-reports/crash-*.txt
+// when it catches the problem itself, and Java writes hs_err_pid*.log when it
+// falls over so hard the game never gets a say. Both are listed together.
+function listCrashReports(gameFolder) {
+  const found = [];
+
+  const add = (file, kind) => {
+    try {
+      const stat = fs.statSync(file);
+      found.push({
+        id: `${kind}:${path.basename(file)}`,
+        name: path.basename(file),
+        kind,
+        when: stat.mtime.toISOString(),
+        size: stat.size
+      });
+    } catch {
+      // Vanished between listing and reading. Nothing to report.
+    }
+  };
+
+  const reports = path.join(gameFolder, 'crash-reports');
+  if (fs.existsSync(reports)) {
+    for (const name of fs.readdirSync(reports)) {
+      if (name.endsWith('.txt')) add(path.join(reports, name), 'game');
+    }
+  }
+
+  if (fs.existsSync(gameFolder)) {
+    for (const name of fs.readdirSync(gameFolder)) {
+      if (/^hs_err_pid\d+\.log$/.test(name)) add(path.join(gameFolder, name), 'jvm');
+    }
+  }
+
+  return found.sort((a, b) => b.when.localeCompare(a.when));
+}
+
+// The name is picked from a list the launcher itself produced, and it is
+// resolved back to a folder here rather than trusted as a path - a page
+// should never be able to name a file outside these two folders.
+function crashReportPath(gameFolder, id) {
+  const separator = id.indexOf(':');
+  const kind = id.slice(0, separator);
+  const name = id.slice(separator + 1);
+
+  if (name !== path.basename(name)) return null;
+  if (kind === 'game' && name.endsWith('.txt')) {
+    return path.join(gameFolder, 'crash-reports', name);
+  }
+  if (kind === 'jvm' && /^hs_err_pid\d+\.log$/.test(name)) {
+    return path.join(gameFolder, name);
+  }
+  return null;
+}
+
+// The one line worth reading first. The game states its own cause under
+// "Description"; Java puts its own on a line beginning with "#".
+function crashHeadline(text) {
+  const description = text.match(/^Description:\s*(.+)$/m);
+  const exception = text.match(/^([\w.$]+(?:Exception|Error)[^\n]*)$/m);
+  if (description) {
+    return exception ? `${description[1].trim()} - ${exception[1].trim()}` : description[1].trim();
+  }
+
+  const jvm = text.match(/^#\s+(.*(?:SIGSEGV|EXCEPTION|Out of Memory|memory).*)$/mi);
+  if (jvm) return jvm[1].trim();
+
+  return exception ? exception[1].trim() : null;
+}
+
+ipcMain.handle('list-crash-reports', () => {
+  const settings = loadSettings();
+  try {
+    return listCrashReports(settings.gameFolder);
+  } catch {
+    return [];
+  }
+});
+
+ipcMain.handle('read-crash-report', (event, id) => {
+  const settings = loadSettings();
+  const file = crashReportPath(settings.gameFolder, String(id || ''));
+  if (!file || !fs.existsSync(file)) return { ok: false };
+
+  let text = fs.readFileSync(file, 'utf-8');
+
+  // These run to hundreds of kilobytes of register dumps and loaded
+  // libraries. The top is where the reason is; the rest is for a search
+  // engine, and the file itself is one click away.
+  const limit = 60000;
+  const trimmed = text.length > limit;
+  if (trimmed) text = text.slice(0, limit);
+
+  return { ok: true, text, trimmed, headline: crashHeadline(text) };
+});
+
+ipcMain.handle('reveal-crash-report', (event, id) => {
+  const settings = loadSettings();
+  const file = crashReportPath(settings.gameFolder, String(id || ''));
+  if (file && fs.existsSync(file)) shell.showItemInFolder(file);
 });
 
 // Every version writes its mod settings into the same config folder, and the
@@ -654,6 +797,29 @@ function listInstalledVersions(gameFolder) {
     .map(entry => entry.name);
 }
 
+// Which game version a custom profile is really a build of. The profile says
+// so itself when it was made by Fabric, Quilt or NeoForge; the ones written
+// here for the jar mod era are a copy of the vanilla description under a new
+// name, and there the name is what is left to go on.
+function baseVersionOf(gameFolder, profileId, officialIds) {
+  const jsonPath = path.join(gameFolder, 'versions', profileId, `${profileId}.json`);
+  try {
+    const json = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+    if (json.inheritsFrom) return json.inheritsFrom;
+  } catch {
+    // Fall through to reading the name.
+  }
+
+  // The longest official id the name starts with, so 1.12.2 is never mistaken
+  // for 1.12 just because it was tried first.
+  let best = null;
+  for (const id of officialIds) {
+    if (!profileId.startsWith(id)) continue;
+    if (!best || id.length > best.length) best = id;
+  }
+  return best;
+}
+
 async function fetchVersionManifest() {
   const data = await fetchJson(VERSION_MANIFEST_URL);
   fs.writeFileSync(versionsCachePath, JSON.stringify(data));
@@ -712,22 +878,41 @@ ipcMain.handle('get-versions', async () => {
   }
 
   // Anything installed that Mojang does not list is a modded or custom build
-  // (Forge, Fabric, and so on). Those go first - they are the user's own.
-  const extra = [];
+  // (Forge, Fabric, and so on). Each one belongs directly under the version it
+  // was built from - pushed to the top of the list it says nothing about where
+  // it fits, and 1.2.5 with Forge ends up above 1.21.
+  const officialIds = [...official.keys()];
+  const orphans = [];
+
   for (const id of installed) {
     if (versions.some(v => v.id === id)) continue;
     const known = official.get(id);
-    extra.push({
+    const entry = {
       id,
       type: known ? known.type : 'custom',
       releaseTime: known ? known.releaseTime : null,
       installed: true,
       custom: !known
-    });
+    };
+
+    const base = known ? null : baseVersionOf(settings.gameFolder, id, officialIds);
+    const at = base ? versions.findIndex(v => v.id === base) : -1;
+
+    if (at === -1) orphans.push(entry);
+    else {
+      entry.basedOn = base;
+      // After the base version and after any builds already placed under it,
+      // so several loaders on one version keep the order they were found in.
+      let insertAt = at + 1;
+      while (insertAt < versions.length && versions[insertAt].basedOn === base) insertAt++;
+      versions.splice(insertAt, 0, entry);
+    }
   }
 
   return {
-    versions: [...extra, ...versions],
+    // Only what could not be placed goes to the top - there is nowhere else
+    // for it, and it is still the player's own build.
+    versions: [...orphans, ...versions],
     source,
     error,
     // Releases older than this are "old releases" for the filter.

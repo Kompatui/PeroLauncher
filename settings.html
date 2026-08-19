@@ -26,8 +26,10 @@
 
   <div class="settings-page">
     <div class="settings-row compact" id="row-version">
-      <span class="settings-label" data-i18n="settings.version">Version</span>
-      <span class="settings-value" id="current-version">—</span>
+      <span class="row-main">
+        <span class="settings-label" data-i18n="settings.version">Version</span>
+        <span class="settings-value" id="current-version">—</span>
+      </span>
       <button class="loader-badge hidden" id="edit-loader">
         <span class="loader-badge-name" id="current-loader"></span>
         <svg class="pencil" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
@@ -83,9 +85,24 @@
         <span class="settings-value" id="current-jarmods">—</span>
       </div>
 
+      <div class="settings-item value" id="item-ongamestart">
+        <span class="settings-label" data-i18n="settings.onGameStart">When the game starts</span>
+        <span class="settings-value" id="current-ongamestart">—</span>
+      </div>
+
+      <div class="settings-item value" id="item-javaargs">
+        <span class="settings-label" data-i18n="settings.javaArgs">Java arguments</span>
+        <span class="settings-value" id="current-javaargs">—</span>
+      </div>
+
       <div class="settings-item value" id="item-gamefolder">
         <span class="settings-label" data-i18n="settings.gameFolder">Game folder</span>
         <span class="settings-value" id="current-gamefolder">—</span>
+      </div>
+
+      <div class="settings-item value" id="item-logs">
+        <span class="settings-label" data-i18n="settings.logs">Crash reports</span>
+        <span class="settings-value" data-i18n="settings.open">Open</span>
       </div>
 
       <div class="settings-item value" id="item-language">

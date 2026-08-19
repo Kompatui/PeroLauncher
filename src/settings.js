@@ -65,6 +65,10 @@ function renderTranslatedValues() {
     settings.accountName || t('account.notSignedIn');
   document.getElementById('current-java').textContent =
     settings.javaPath || t('settings.javaAuto');
+  document.getElementById('current-ongamestart').textContent =
+    t(ON_GAME_START_LABELS[settings.onGameStart] || 'onGameStart.minimize');
+  document.getElementById('current-javaargs').textContent =
+    settings.javaArgs || t('javaArgs.none');
   renderLoaderBadge();
 }
 
@@ -573,19 +577,21 @@ document.getElementById('item-java').addEventListener('click', async () => {
     <p class="modal-note">${t('java.requiredFor')} ${settings.version}: Java ${status.required ?? '?'}</p>
     <p class="modal-note explain">${t('java.howItWorks')}</p>
 
-    <div class="modal-lang-option${isAuto ? ' current' : ''}" data-java="auto">
-      ${t('settings.javaAuto')}
-      <div class="java-hint">${autoHint}</div>
-    </div>
-
-    ${status.installed.map(java => `
-      <div class="modal-lang-option${settings.javaPath === java.path ? ' current' : ''}" data-java="${java.path}">
-        Java ${java.major}${java.downloaded ? ` <span class="loader-soon">${t('java.downloadedByLauncher')}</span>` : ''}
-        <div class="java-hint">${java.path}</div>
+    <div class="option-list">
+      <div class="modal-lang-option${isAuto ? ' current' : ''}" data-java="auto">
+        ${t('settings.javaAuto')}
+        <div class="java-hint">${autoHint}</div>
       </div>
-    `).join('')}
 
-    <div class="modal-lang-option" data-java="browse">${t('java.browse')}</div>
+      ${status.installed.map(java => `
+        <div class="modal-lang-option${settings.javaPath === java.path ? ' current' : ''}" data-java="${java.path}">
+          Java ${java.major}${java.downloaded ? ` <span class="loader-soon">${t('java.downloadedByLauncher')}</span>` : ''}
+          <div class="java-hint">${java.path}</div>
+        </div>
+      `).join('')}
+
+      <div class="modal-lang-option" data-java="browse">${t('java.browse')}</div>
+    </div>
     ${closeButtonHtml()}
   `;
   wireCloseButton();
@@ -624,11 +630,170 @@ async function renderJarModsRow() {
     : t('jarmods.empty');
 }
 
-document.getElementById('item-jarmods').addEventListener('click', async () => {
-  await window.api.openJarModsFolder();
-  // Reopening the page is not needed to see what was just added.
-  setTimeout(renderJarModsRow, 1500);
+// The name alone invites the wrong folder: ordinary mods are .jar files too,
+// and what tells these apart is not the extension but how they are installed.
+// So the row explains itself before it opens anything.
+document.getElementById('item-jarmods').addEventListener('click', () => {
+  modalBox.innerHTML = `
+    <h3>${t('settings.jarmods')}</h3>
+    <p class="modal-note explain">${t('jarmods.hint')}</p>
+    <div class="modal-buttons">
+      <button class="modal-btn" id="jarmods-open">${t('jarmods.openFolder')}</button>
+      <button class="modal-btn-cancel" id="modal-cancel">${t('modal.close')}</button>
+    </div>
+  `;
+  overlay.classList.remove('hidden');
+  wireCloseButton();
+
+  document.getElementById('jarmods-open').addEventListener('click', async () => {
+    await window.api.openJarModsFolder();
+    closeModal();
+    // Reopening the page is not needed to see what was just added.
+    setTimeout(renderJarModsRow, 1500);
+  });
 });
+
+const ON_GAME_START_LABELS = {
+  minimize: 'onGameStart.minimize',
+  keep: 'onGameStart.keep',
+  close: 'onGameStart.close'
+};
+
+document.getElementById('item-ongamestart').addEventListener('click', () => {
+  const options = Object.keys(ON_GAME_START_LABELS).map(value => `
+    <div class="modal-lang-option${settings.onGameStart === value ? ' current' : ''}"
+         data-value="${value}">${t(ON_GAME_START_LABELS[value])}</div>
+  `).join('');
+
+  modalBox.innerHTML = `
+    <h3>${t('settings.onGameStart')}</h3>
+    ${options}
+    ${closeButtonHtml()}
+  `;
+  overlay.classList.remove('hidden');
+  wireCloseButton();
+
+  modalBox.querySelectorAll('.modal-lang-option').forEach(option => {
+    option.addEventListener('click', async () => {
+      settings.onGameStart = option.dataset.value;
+      await saveSettings();
+      renderTranslatedValues();
+      closeModal();
+    });
+  });
+});
+
+// Every launcher lets these be typed in, and for the same reason: sooner or
+// later a mod, a driver or a machine needs something nobody could have
+// guessed in advance. What is typed goes on last and wins.
+document.getElementById('item-javaargs').addEventListener('click', () => {
+  modalBox.innerHTML = `
+    <h3>${t('settings.javaArgs')}</h3>
+    <p class="modal-note explain">${t('javaArgs.explain')}</p>
+    <input type="text" id="java-args" class="modal-search"
+           placeholder="${t('javaArgs.placeholder')}" value="${escapeHtml(settings.javaArgs || '')}">
+    <div class="modal-buttons">
+      <button class="modal-btn" id="java-args-save">${t('modal.save')}</button>
+      <button class="modal-btn-cancel" id="modal-cancel">${t('modal.close')}</button>
+    </div>
+  `;
+  overlay.classList.remove('hidden');
+  wireCloseButton();
+
+  const field = document.getElementById('java-args');
+
+  async function save() {
+    settings.javaArgs = field.value.trim();
+    await saveSettings();
+    renderTranslatedValues();
+    closeModal();
+  }
+
+  document.getElementById('java-args-save').addEventListener('click', save);
+  field.addEventListener('keydown', event => { if (event.key === 'Enter') save(); });
+  field.focus();
+});
+
+document.getElementById('item-logs').addEventListener('click', openCrashReportList);
+
+// A crash report is the game explaining itself, but it opens in Notepad as a
+// wall of stack traces. Read here instead, newest first, with the line that
+// actually says what happened pulled to the front.
+async function openCrashReportList() {
+  modalBox.innerHTML = `
+    <h3>${t('settings.logs')}</h3>
+    <p class="modal-note">${t('crashes.loading')}</p>
+    ${closeButtonHtml()}
+  `;
+  overlay.classList.remove('hidden');
+  wireCloseButton();
+
+  const reports = await window.api.listCrashReports();
+  if (overlay.classList.contains('hidden')) return;
+
+  if (!reports.length) {
+    modalBox.innerHTML = `
+      <h3>${t('settings.logs')}</h3>
+      <p class="modal-note explain">${t('crashes.none')}</p>
+      ${closeButtonHtml()}
+    `;
+    wireCloseButton();
+    return;
+  }
+
+  modalBox.innerHTML = `
+    <h3>${t('settings.logs')}</h3>
+    <div class="version-list">
+      ${reports.map(report => `
+        <div class="version-row" data-id="${escapeHtml(report.id)}">
+          <span class="version-id">${formatCrashTime(report.when)}</span>
+          <span class="version-meta">
+            <span class="version-installed">${report.kind === 'jvm' ? t('crashes.kindJvm') : t('crashes.kindGame')}</span>
+          </span>
+        </div>
+      `).join('')}
+    </div>
+    <div class="modal-buttons">
+      <button class="modal-btn" id="crashes-folder">${t('crashes.openFolder')}</button>
+      <button class="modal-btn-cancel" id="modal-cancel">${t('modal.close')}</button>
+    </div>
+  `;
+  wireCloseButton();
+
+  document.getElementById('crashes-folder').addEventListener('click', () => window.api.openCrashReports());
+
+  modalBox.querySelectorAll('.version-row').forEach(row => {
+    row.addEventListener('click', () => showCrashReport(row.dataset.id));
+  });
+}
+
+async function showCrashReport(id) {
+  const report = await window.api.readCrashReport(id);
+  if (!report.ok) return openCrashReportList();
+
+  modalBox.innerHTML = `
+    <h3>${t('settings.logs')}</h3>
+    ${report.headline ? `<p class="modal-note warn">${escapeHtml(report.headline)}</p>` : ''}
+    <pre class="crash-text">${escapeHtml(report.text)}</pre>
+    ${report.trimmed ? `<p class="modal-note">${t('crashes.trimmed')}</p>` : ''}
+    <div class="modal-buttons">
+      <button class="modal-btn" id="crash-back">${t('crashes.back')}</button>
+      <button class="modal-btn" id="crash-reveal">${t('crashes.showFile')}</button>
+      <button class="modal-btn-cancel" id="modal-cancel">${t('modal.close')}</button>
+    </div>
+  `;
+  wireCloseButton();
+
+  document.getElementById('crash-back').addEventListener('click', openCrashReportList);
+  document.getElementById('crash-reveal').addEventListener('click', () => window.api.revealCrashReport(id));
+}
+
+function formatCrashTime(iso) {
+  const when = new Date(iso);
+  const pad = value => String(value).padStart(2, '0');
+  return `${pad(when.getDate())}.${pad(when.getMonth() + 1)}.${when.getFullYear()} ` +
+         `${pad(when.getHours())}:${pad(when.getMinutes())}`;
+}
 
 document.getElementById('item-gamefolder').addEventListener('click', async () => {
   const folder = await window.api.pickFolder();

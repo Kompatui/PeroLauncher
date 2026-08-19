@@ -27,5 +27,9 @@ contextBridge.exposeInMainWorld('api', {
   getAvailableLoaders: (mcVersion) => ipcRenderer.invoke('get-available-loaders', mcVersion),
   getJavaStatus: (mcVersion) => ipcRenderer.invoke('get-java-status', mcVersion),
   getJarMods: () => ipcRenderer.invoke('get-jarmods'),
-  openJarModsFolder: () => ipcRenderer.invoke('open-jarmods-folder')
+  openJarModsFolder: () => ipcRenderer.invoke('open-jarmods-folder'),
+  openCrashReports: () => ipcRenderer.invoke('open-crash-reports'),
+  listCrashReports: () => ipcRenderer.invoke('list-crash-reports'),
+  readCrashReport: (id) => ipcRenderer.invoke('read-crash-report', id),
+  revealCrashReport: (id) => ipcRenderer.invoke('reveal-crash-report', id)
 });

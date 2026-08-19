@@ -1,41 +1,87 @@
 .settings-page {
   height: calc(100vh - 40px);
   overflow-y: auto;
+  /* Nothing here is worth scrolling sideways for. A narrow window makes the
+     page longer, never wider. */
+  overflow-x: hidden;
 }
 
 .settings-row.compact {
-  height: 70px;
+  min-height: 70px;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-wrap: wrap;
   gap: 15px;
+  padding: 10px 20px;
   font-size: 20px;
   cursor: pointer;
   background: #e8e8e8;
   transition: background-color 0.15s ease;
 }
 
+/* The same lift the tiles on the main screen have, so the two screens behave
+   like one thing. z-index matters here: a scaled row has to come up over its
+   neighbours, or it grows underneath them and only looks misaligned. */
+.settings-row.compact,
+.settings-item.value {
+  position: relative;
+  z-index: 1;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.settings-row.compact:hover,
+.settings-item.value:hover {
+  transform: scale(1.03);
+  z-index: 2;
+}
+
 .settings-row.compact:hover {
   background: #d8d8d8;
 }
 
-#row-account { background: #efefef; }
-#row-account:hover { background: #dedede; }
+/* Not a button of its own, so it does not lift on its own - the row it lives
+   in does that. It only deepens in colour. */
+.settings-row.compact:hover .loader-badge {
+  background: #d97b18;
+}
 
-.ram-row {
-  background: #e0e0e0;
+/* The same pastel family as the tiles on the main screen, and the same rule
+   for hover: a fuller shade of the one colour, never a filter. */
+#row-account { background: #d9c2f0; }
+#row-account:hover { background: #c3a2e8; }
+
+/* Written against .settings-row too - on its own the class loses to
+   .settings-row.compact and the colour silently never arrives. */
+.settings-row.ram-row {
+  background: #ffe066;
   cursor: default;
   gap: 25px;
+}
+
+/* Nothing to click here - it holds a slider and a field - so it neither
+   lifts nor changes colour. Only what responds to a click should look like
+   it will. */
+.settings-row.ram-row:hover {
+  background: #ffe066;
+  transform: none;
 }
 
 .ram-controls {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 10px;
 }
 
+/* Free to shrink, but never to grow. Growing made the row size itself from
+   the slider's smaller basis and then run out of room at its real size, so
+   "Auto" wrapped onto a second line in a window with space to spare. */
 .ram-controls input[type="range"] {
+  flex: 0 1 auto;
   width: 220px;
+  min-width: 100px;
 }
 
 .ram-controls input[type="number"] {
@@ -65,19 +111,54 @@
 }
 
 .settings-item {
-  height: 70px;
+  min-height: 70px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 20px;
   background: #f5f5f5;
   border: 1px solid #e5e5e5;
   font-size: 16px;
 }
 
+/* The value can be a long path or a list of file names, so it gives way
+   first and keeps to its own side. */
+.settings-item .settings-value {
+  text-align: right;
+  min-width: 0;
+}
+
+.windowsize-controls {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* Below this the two columns stop being two columns worth of room, and
+   everything simply continues downwards - the page already scrolls. */
+@media (max-width: 640px) {
+  .settings-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Narrower still: the name and its value stop sharing a line. */
+@media (max-width: 420px) {
+  .settings-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .settings-item .settings-value,
+  .windowsize-controls {
+    text-align: left;
+    justify-content: flex-start;
+  }
+}
+
 .settings-item.value {
   cursor: pointer;
-  transition: background-color 0.15s ease;
 }
 
 .settings-item.value:hover {
@@ -100,24 +181,67 @@
   left: 0;
   right: 0;
   bottom: 0;
+  /* Above the rows. They carry a z-index of their own so a hovered one lifts
+     over its neighbours, and without a higher one here the whole page would
+     be painted over the dialog - open, dimming nothing, visible only in the
+     gaps between tiles. */
+  z-index: 10;
   background: rgba(0,0,0,0.4);
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 20px;
+  box-sizing: border-box;
 }
 
 .modal-overlay.hidden {
   display: none;
 }
 
+/* Centred content taller than its container spills out of both ends, which is
+   how a long list of Java versions ended up drawn over the title bar. The box
+   is not allowed to outgrow the window; anything longer scrolls inside it. */
 .modal-box {
   background: white;
   padding: 25px;
   border-radius: 6px;
-  min-width: 320px;
+  min-width: min(320px, 100%);
+  max-width: 100%;
+  max-height: 100%;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  overflow-y: auto;
+}
+
+/* A crash report read as it was written - fixed width, wrapped rather than
+   scrolled sideways, and never taller than the room it has. */
+.crash-text {
+  margin: 0;
+  padding: 12px;
+  background: #f6f6f6;
+  border-radius: 4px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-y: auto;
+  min-height: 0;
+  max-height: 50vh;
+  width: min(640px, 100%);
+  box-sizing: border-box;
+}
+
+/* A list of choices that keeps the heading and the buttons in place instead
+   of scrolling them away with itself. */
+.option-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .modal-box h3 {
@@ -336,6 +460,13 @@
   text-align: center;
 }
 
+/* Marks the one already chosen, so a list of options is never a list of
+   equally likely guesses. */
+.modal-lang-option.current {
+  background: #e8f3e9;
+  font-weight: bold;
+}
+
 .modal-lang-option:hover {
   background: #e0e0e0;
 }
@@ -368,22 +499,32 @@
 
 /* Sits at the right edge of the version row and appears only once a mod
    loader is chosen - it is the way back into that choice. */
+/* A tile of its own standing beside the version, not a button laid on top of
+   it. It was absolute before, which is why a narrow window slid it over the
+   version number instead of moving it aside. */
 .loader-badge {
-  position: absolute;
-  right: 12px;
+  align-self: stretch;
+  flex-shrink: 0;
+  max-width: 55%;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  height: 40px;
-  padding: 0 12px;
+  padding: 0 20px;
   border: none;
-  border-radius: 4px;
+  border-radius: 0;
   background: #f0902a;
   color: white;
-  font-size: 14px;
+  font-size: 15px;
   font-family: inherit;
   cursor: pointer;
   transition: background-color 0.15s ease;
+}
+
+.loader-badge-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .loader-badge:hover {
@@ -394,8 +535,22 @@
   display: none;
 }
 
+/* The row is edge to edge so the loader tile can reach the edge; the padding
+   moves onto the part that holds the name and the value. */
 #row-version {
-  position: relative;
+  padding: 0;
+  gap: 0;
+}
+
+.row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 15px;
+  padding: 10px 20px;
 }
 
 .back-btn {

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, shell, dialog, utilityProcess } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -645,37 +645,27 @@ ipcMain.handle('install-mod', async (event, id, source, projectId, kind) => {
 
 ipcMain.handle('launch-game', (event, profile) => startGame(profile));
 
-// Java does not always go quietly, and it leaves children of its own. Asking
-// Windows to take the whole tree down is the only way to be sure the game a
-// player called off is actually gone.
-function stopGameProcess(child) {
-  if (!child || child.killed) return;
-
-  try {
-    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
-  } catch (e) {
-    console.log('[LAUNCH] taskkill refused:', e.message);
-  }
-
-  try {
-    child.kill();
-  } catch (e) {
-    console.log('[LAUNCH] could not stop the game process:', e.message);
-  }
-}
-
 // Answering at once matters more than stopping at once. A download already in
 // flight cannot be interrupted mid-file - and should not be, since the file it
 // finishes is one less to fetch next time - but the player asked to stop, and
-// the screen has to agree with them immediately.
+// nothing they asked for should have to wait on a download.
 ipcMain.handle('cancel-launch', (event) => {
   if (!activeLaunch) return false;
 
   activeLaunch.cancelled = true;
   event.sender.send('launch-progress', { stage: 'cancelled' });
-  console.log('[LAUNCH] called off' + (activeLaunch.child ? ` - stopping process ${activeLaunch.child.pid}` : ' before the game started'));
+  console.log('[LAUNCH] called off' +
+    (activeLaunch.pid ? ` - stopping process ${activeLaunch.pid}` : ' before the game started'));
 
-  stopGameProcess(activeLaunch.child);
+  // The worker holds the game and knows how to take it down; it is told
+  // rather than killed outright, so it can stop the whole tree Java leaves.
+  if (activeLaunch.worker) {
+    try {
+      activeLaunch.worker.postMessage({ type: 'stop' });
+    } catch (e) {
+      console.log('[LAUNCH] could not reach the launch worker:', e.message);
+    }
+  }
   return true;
 });
 
@@ -688,9 +678,7 @@ let activeLaunch = null;
 
 async function startGame(profile, ramOverride) {
   const settings = loadSettings();
-  const launcher = new Client();
-
-  const launch = { cancelled: false, child: null };
+  const launch = { cancelled: false, worker: null, pid: null };
   activeLaunch = launch;
 
   const launcherWindow = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
@@ -889,40 +877,15 @@ async function startGame(profile, ramOverride) {
 
   say('files', { type: '', done: 0, total: 0 });
 
-  // The process arrives after the downloading is done, which is exactly when
-  // calling it off has to still work - so it is kept, and killed at once if
-  // the answer came while we were waiting.
-  launcher.launch(opts).then(child => {
-    launch.child = child;
-    if (launch.cancelled) stopGameProcess(child);
-  }).catch(e => console.log('[LAUNCH] could not start:', e.message));
-
-  launcher.on('debug', (e) => console.log('[DEBUG]', e));
-
-  // What the launcher is fetching and how far along it is. This is the part
-  // that takes the minutes: the game jar, its libraries, and several thousand
-  // small asset files.
-  //
-  // One message per file means nearly four thousand of them, and the page
-  // spent so long redrawing that it took twenty seconds to notice a click.
-  // A few a second is all anyone can read anyway.
-  let lastSaid = 0;
-  launcher.on('progress', (e) => {
-    const finished = e.task >= e.total;
-    if (!finished && Date.now() - lastSaid < 150) return;
-
-    lastSaid = Date.now();
-    say('files', { type: e.type, done: e.task, total: e.total });
-  });
+  // Handed to a process of its own. Doing it here meant the window stopped
+  // answering while thousands of files were checked, and a player could press
+  // cancel with nothing there to receive the press.
+  const worker = utilityProcess.fork(path.join(__dirname, 'src', 'launch-worker.js'));
+  launch.worker = worker;
 
   // The game's own output is the only place its reason for dying shows up,
   // so keep the tail of it around for the report below.
   const recentOutput = [];
-  launcher.on('data', (e) => {
-    console.log('[DATA]', e);
-    recentOutput.push(String(e));
-    if (recentOutput.length > 60) recentOutput.shift();
-  });
 
   // Measured now, not when the game dies: by then the dying process has given
   // its memory back, and the figure would look like there was plenty.
@@ -933,27 +896,55 @@ async function startGame(profile, ramOverride) {
   // at an empty desktop with no sign that anything is happening.
   let steppedAside = false;
 
-  // The last guard, and the one that matters: the answer to stop can arrive
-  // while the game is already being spawned, and a game that starts after
-  // being called off is the launcher overruling the player.
-  launcher.on('data', () => {
-    if (launch.cancelled) {
-      stopGameProcess(launch.child);
+  // One message per file means nearly four thousand of them, which is more
+  // than anyone can read and more than the page can draw.
+  let lastSaid = 0;
+
+  worker.on('message', message => {
+    if (message.type === 'debug') return console.log('[DEBUG]', message.line);
+
+    if (message.type === 'progress') {
+      const e = message.progress;
+      const finished = e.task >= e.total;
+      if (!finished && Date.now() - lastSaid < 150) return;
+
+      lastSaid = Date.now();
+      return say('files', { type: e.type, done: e.task, total: e.total });
+    }
+
+    if (message.type === 'started') {
+      launch.pid = message.pid;
       return;
     }
 
-    if (steppedAside || !launcherWindow || launcherWindow.isDestroyed()) return;
-    steppedAside = true;
+    if (message.type === 'error') {
+      console.log('[LAUNCH] could not start:', message.error);
+      return;
+    }
 
-    say('running');
+    if (message.type === 'data') {
+      console.log('[DATA]', message.line);
+      recentOutput.push(message.line);
+      if (recentOutput.length > 60) recentOutput.shift();
 
-    if (settings.onGameStart === 'minimize') launcherWindow.minimize();
-    else if (settings.onGameStart === 'close') app.quit();
-  });
+      // The first word out of the game means it is running.
+      if (steppedAside || !launcherWindow || launcherWindow.isDestroyed()) return;
+      if (launch.cancelled) return;
 
-  launcher.on('close', (code) => {
+      steppedAside = true;
+      say('running');
+
+      if (settings.onGameStart === 'minimize') launcherWindow.minimize();
+      else if (settings.onGameStart === 'close') app.quit();
+      return;
+    }
+
+    if (message.type !== 'close') return;
+
+    const code = message.code;
     say(launch.cancelled ? 'cancelled' : 'ended');
     if (activeLaunch === launch) activeLaunch = null;
+    worker.kill();
 
     // Back where it was. A crash is exactly when the launcher is wanted
     // again, so this happens before the report below.
@@ -975,6 +966,11 @@ async function startGame(profile, ramOverride) {
       300
     );
   });
+
+  worker.postMessage({ type: 'launch', opts });
+
+  // The answer may already have been given while the worker was starting.
+  if (launch.cancelled) worker.postMessage({ type: 'stop' });
 
   return { started: true, error: null };
 }

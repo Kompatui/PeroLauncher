@@ -247,6 +247,24 @@ ipcMain.handle('launch-game', async (event, profile) => {
     } catch (e) {
       return { started: false, error: `loader: ${e.message}` };
     }
+  } else if (forgeUsesJarMod(settings.version) && listUserJarMods(settings.gameFolder).length > 0) {
+    // No loader picked, but the player has put jar mods in place - on these
+    // versions that is how mods were installed, loader or not.
+    try {
+      opts.version.custom = await installLegacyProfile(
+        settings.version, settings.gameFolder, `${settings.version}-jarmod`, null
+      );
+      reconcileLanguageOption(
+        settings.gameFolder,
+        path.join(settings.gameFolder, 'versions', opts.version.custom, `${opts.version.custom}.jar`)
+      );
+      opts.customArgs = [
+        ...(opts.customArgs || []),
+        `-Dminecraft.applet.TargetDirectory=${settings.gameFolder}`
+      ];
+    } catch (e) {
+      return { started: false, error: `jarmods: ${e.message}` };
+    }
   }
 
   launcher.launch(opts);
@@ -726,27 +744,9 @@ function forgeLoader() {
       return file;
     },
 
-    // Builds the patched game jar and registers it as a version of its own,
-    // so the vanilla jar next to it stays untouched.
     async installJarMod(mcVersion, loaderVersion, gameFolder) {
-      const profileId = this.profileId(mcVersion, loaderVersion);
-      const directory = path.join(gameFolder, 'versions', profileId);
-      const jarPath = path.join(directory, `${profileId}.jar`);
-      const jsonPath = path.join(directory, `${profileId}.json`);
-
-      if (fs.existsSync(jarPath) && fs.existsSync(jsonPath)) return profileId;
-
-      const meta = await versionMetadata(mcVersion);
-      const vanillaJar = await fetchBuffer(meta.downloads.client.url);
-      const modArchive = await this.fetchJarModArchive(`${mcVersion}-${loaderVersion}`);
-
-      fs.mkdirSync(directory, { recursive: true });
-      fs.writeFileSync(jarPath, buildJarMod(vanillaJar, modArchive));
-
-      // The vanilla description, renamed. Everything the loader adds already
-      // lives inside the patched jar, so nothing else has to be declared.
-      fs.writeFileSync(jsonPath, JSON.stringify({ ...meta, id: profileId }, null, 2));
-      return profileId;
+      const archive = await this.fetchJarModArchive(`${mcVersion}-${loaderVersion}`);
+      return installLegacyProfile(mcVersion, gameFolder, this.profileId(mcVersion, loaderVersion), archive);
     },
 
     // 1.4 and 1.5 call it universal.zip, 1.1 through 1.3 call it client.zip.
@@ -941,7 +941,7 @@ function reconcileLanguageOption(gameFolder, jarPath) {
 // Vanilla jar with the loader's files laid over it. The signatures have to go:
 // once a single class is replaced they no longer match, and the game refuses
 // to start rather than run a jar whose signature is broken.
-function buildJarMod(vanillaJar, modArchive) {
+function buildJarMod(vanillaJar, layers) {
   const patched = new AdmZip(vanillaJar);
 
   // Collect first, delete after: removing entries while walking the same list
@@ -952,13 +952,69 @@ function buildJarMod(vanillaJar, modArchive) {
     .filter(name => name.startsWith('META-INF/'));
   for (const name of signatures) patched.deleteFile(name);
 
-  for (const entry of new AdmZip(modArchive).getEntries()) {
-    if (entry.isDirectory || entry.entryName.startsWith('META-INF/')) continue;
-    patched.deleteFile(entry.entryName);
-    patched.addFile(entry.entryName, entry.getData());
+  // Later layers win, which is why the order they are applied in matters:
+  // ModLoader first, then whatever builds on top of it.
+  for (const layer of layers) {
+    for (const entry of new AdmZip(layer).getEntries()) {
+      if (entry.isDirectory || entry.entryName.startsWith('META-INF/')) continue;
+      patched.deleteFile(entry.entryName);
+      patched.addFile(entry.entryName, entry.getData());
+    }
   }
 
   return patched.toBuffer();
+}
+
+// Builds the patched game jar and registers it as a version of its own, so the
+// vanilla jar next to it stays untouched. The player's own jar mods go on
+// first and the loader last, which is the order that era expected: ModLoader
+// underneath, Forge on top of it.
+async function installLegacyProfile(mcVersion, gameFolder, profileId, loaderArchive) {
+  const userMods = listUserJarMods(gameFolder);
+  const directory = path.join(gameFolder, 'versions', profileId);
+  const jarPath = path.join(directory, `${profileId}.jar`);
+  const jsonPath = path.join(directory, `${profileId}.json`);
+  const stampPath = path.join(directory, 'jarmods.json');
+
+  // Rebuilt when the player's set of jar mods changes - otherwise adding one
+  // would silently do nothing, since the patched jar is already there.
+  const stamp = JSON.stringify(userMods.map(file => ({
+    name: path.basename(file),
+    size: fs.statSync(file).size
+  })));
+
+  const built = fs.existsSync(jarPath) && fs.existsSync(jsonPath);
+  const sameMods = fs.existsSync(stampPath) && fs.readFileSync(stampPath, 'utf-8') === stamp;
+  if (built && sameMods) return profileId;
+
+  const meta = await versionMetadata(mcVersion);
+  const vanillaJar = await fetchBuffer(meta.downloads.client.url);
+
+  const layers = userMods.map(file => fs.readFileSync(file));
+  if (loaderArchive) layers.push(loaderArchive);
+
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(jarPath, buildJarMod(vanillaJar, layers));
+  fs.writeFileSync(stampPath, stamp);
+
+  // The vanilla description, renamed. Everything the mods add already lives
+  // inside the patched jar, so nothing else has to be declared.
+  fs.writeFileSync(jsonPath, JSON.stringify({ ...meta, id: profileId }, null, 2));
+  return profileId;
+}
+
+// Files the player drops in themselves. Mods of that era - ModLoader, Optifine,
+// anything from 2011 to 2013 - are installed by being pasted into the game jar,
+// and some of them are things we may not fetch on their behalf. Order is
+// alphabetical, so a name can decide it: "1-ModLoader.zip" goes before "2-...".
+function listUserJarMods(gameFolder) {
+  const directory = path.join(gameFolder, 'jarmods');
+  if (!fs.existsSync(directory)) return [];
+
+  return fs.readdirSync(directory)
+    .filter(name => /\.(zip|jar)$/i.test(name))
+    .sort((a, b) => a.localeCompare(b))
+    .map(name => path.join(directory, name));
 }
 
 // The full description of a game version, fetched from the address the
@@ -1211,6 +1267,22 @@ ipcMain.handle('get-loader-versions', async (event, loaderId, mcVersion) => {
     // Fabric answers 400 for a game version it does not support.
     return { versions: [], error: e.message };
   }
+});
+
+ipcMain.handle('get-jarmods', () => {
+  const settings = loadSettings();
+  return {
+    files: listUserJarMods(settings.gameFolder).map(file => path.basename(file)),
+    // Only these versions take jar mods; newer ones load mods from mods/.
+    applies: forgeUsesJarMod(settings.version)
+  };
+});
+
+ipcMain.handle('open-jarmods-folder', () => {
+  const settings = loadSettings();
+  const directory = path.join(settings.gameFolder, 'jarmods');
+  fs.mkdirSync(directory, { recursive: true });
+  shell.openPath(directory);
 });
 
 ipcMain.handle('open-game-folder', () => {

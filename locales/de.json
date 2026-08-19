@@ -56,5 +56,8 @@
   "loader.checking": "Es wird geprüft, welche Loader es für diese Version gibt…",
   "java.howItWorks": "Jede Spielversion benötigt ihr eigenes Java. Der Launcher wählt es selbst: Ist ein passendes bereits installiert, wird es verwendet, sonst wird es von Mojang heruntergeladen - und von Adoptium, wenn Mojang nicht erreichbar ist. Heruntergeladene Runtimes bleiben im Launcher-Ordner und werden wiederverwendet.",
   "crash.freeAtLaunch": "Beim Start frei",
-  "crash.heapIsNotAll": "Der Wert oben ist die Obergrenze für das Spiel selbst. Zusätzlich benötigt Java Speicher für Texturen und internen Bedarf, meist weitere 0,5-1,5 GB. Mehr freier Speicher als zugewiesen bedeutet daher noch nicht, dass es reicht."
+  "crash.heapIsNotAll": "Der Wert oben ist die Obergrenze für das Spiel selbst. Zusätzlich benötigt Java Speicher für Texturen und internen Bedarf, meist weitere 0,5-1,5 GB. Mehr freier Speicher als zugewiesen bedeutet daher noch nicht, dass es reicht.",
+  "settings.jarmods": "Jar-Mods",
+  "jarmods.empty": "Ordner ist leer - öffnen",
+  "jarmods.notForThisVersion": "Nur für Versionen vor 1.6"
 }

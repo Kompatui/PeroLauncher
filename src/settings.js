@@ -35,6 +35,7 @@ async function loadSettingsUI() {
   document.getElementById('current-gamefolder').textContent = settings.gameFolder;
   document.getElementById('current-language').textContent = settings.language.toUpperCase();
   renderTranslatedValues();
+  renderJarModsRow();
 
   const slider = document.getElementById('ram-slider');
   const number = document.getElementById('ram-number');
@@ -486,6 +487,27 @@ document.getElementById('item-java').addEventListener('click', async () => {
       closeModal();
     });
   });
+});
+
+// Old versions take mods by having them pasted into the game jar. The folder
+// is the whole interface: drop files in, they are applied in name order.
+async function renderJarModsRow() {
+  const status = await window.api.getJarMods();
+  const value = document.getElementById('current-jarmods');
+
+  if (!status.applies) {
+    value.textContent = t('jarmods.notForThisVersion');
+    return;
+  }
+  value.textContent = status.files.length
+    ? status.files.join(', ')
+    : t('jarmods.empty');
+}
+
+document.getElementById('item-jarmods').addEventListener('click', async () => {
+  await window.api.openJarModsFolder();
+  // Reopening the page is not needed to see what was just added.
+  setTimeout(renderJarModsRow, 1500);
 });
 
 document.getElementById('item-gamefolder').addEventListener('click', async () => {

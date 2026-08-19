@@ -20,5 +20,7 @@ contextBridge.exposeInMainWorld('api', {
   getVersions: () => ipcRenderer.invoke('get-versions'),
   getLoaderVersions: (loader, mcVersion) => ipcRenderer.invoke('get-loader-versions', loader, mcVersion),
   getAvailableLoaders: (mcVersion) => ipcRenderer.invoke('get-available-loaders', mcVersion),
-  getJavaStatus: (mcVersion) => ipcRenderer.invoke('get-java-status', mcVersion)
+  getJavaStatus: (mcVersion) => ipcRenderer.invoke('get-java-status', mcVersion),
+  getJarMods: () => ipcRenderer.invoke('get-jarmods'),
+  openJarModsFolder: () => ipcRenderer.invoke('open-jarmods-folder')
 });

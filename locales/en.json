@@ -56,5 +56,8 @@
   "loader.checking": "Checking which loaders exist for this version…",
   "java.howItWorks": "Each game version needs its own Java. The launcher picks it automatically: if a matching one is already installed it is used, otherwise it is downloaded from Mojang, or from Adoptium when Mojang is unreachable. Downloaded runtimes are kept in the launcher folder and reused.",
   "crash.freeAtLaunch": "Free at launch",
-  "crash.heapIsNotAll": "The figure above is the ceiling for the game itself. On top of it Java needs memory for textures and its own housekeeping, usually another 0.5-1.5 GB. So more free memory than allocated is still not necessarily enough."
+  "crash.heapIsNotAll": "The figure above is the ceiling for the game itself. On top of it Java needs memory for textures and its own housekeeping, usually another 0.5-1.5 GB. So more free memory than allocated is still not necessarily enough.",
+  "settings.jarmods": "Jar mods",
+  "jarmods.empty": "Folder is empty - open it",
+  "jarmods.notForThisVersion": "Only for versions before 1.6"
 }

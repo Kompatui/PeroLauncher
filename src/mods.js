@@ -117,6 +117,7 @@ async function openPack(id) {
 
   const mods = await window.api.listInstanceMods(id, 'mod');
   const resourcePacks = await window.api.listInstanceMods(id, 'resourcepack');
+  const shaders = await window.api.listInstanceMods(id, 'shader');
   const isActive = store.activeId === id;
   const canHaveMods = pack.loader && pack.loader !== 'vanilla';
 
@@ -159,7 +160,9 @@ async function openPack(id) {
     <div id="content-lists">
       ${contentList(mods, t('packs.kindMods'), 'mod')}
       ${contentList(resourcePacks, t('packs.kindResourcePacks'), 'resourcepack')}
-      ${mods.length || resourcePacks.length ? '' : `<p class="modal-note">${t('packs.nothingInPack')}</p>`}
+      ${contentList(shaders, t('packs.kindShaders'), 'shader')}
+      ${mods.length || resourcePacks.length || shaders.length
+        ? '' : `<p class="modal-note">${t('packs.nothingInPack')}</p>`}
     </div>
   `;
 
@@ -250,11 +253,58 @@ async function browseMods(pack, kind = 'mod') {
   const installed = await window.api.listInstanceMods(pack.id, kind);
   const have = new Set(installed.map(mod => mod.projectId).filter(Boolean));
 
+  const modded = pack.loader && pack.loader !== 'vanilla';
+
   // A texture pack fits any loader, so a pack without one can still have them.
+  // Shaders need a mod to render them, which is why they are only offered
+  // where there is a loader to put that mod on.
   const kinds = [
-    { id: 'mod', label: t('packs.kindMods'), only: pack.loader && pack.loader !== 'vanilla' },
-    { id: 'resourcepack', label: t('packs.kindResourcePacks'), only: true }
+    { id: 'mod', label: t('packs.kindMods'), only: modded },
+    { id: 'resourcepack', label: t('packs.kindResourcePacks'), only: true },
+    { id: 'shader', label: t('packs.kindShaders'), only: modded }
   ].filter(entry => entry.only);
+
+  // Nothing renders shaders yet: say so and offer the missing piece, rather
+  // than showing a catalogue of things that would do nothing once installed.
+  if (kind === 'shader') {
+    const support = await window.api.getShaderSupport(pack.id);
+    if (!support.ready) {
+      page.innerHTML = `
+        <div class="browse-head">
+          <button class="link-btn" id="to-pack">${t('packs.backToPack')}</button>
+          <div class="browse-title"><h2>${t('packs.kindShaders')}</h2></div>
+          <div class="kind-tabs">
+            ${kinds.map(entry => `
+              <button class="kind-tab${entry.id === kind ? ' current' : ''}" data-kind="${entry.id}">${entry.label}</button>
+            `).join('')}
+          </div>
+        </div>
+        <p class="modal-note explain">${t('packs.shadersNeedLoader').replace('%s', escapeHtml(support.name))}</p>
+        <div class="pack-actions">
+          <button class="modal-btn" id="get-shader-loader">${t('packs.installShaderLoader')} ${escapeHtml(support.name)}</button>
+        </div>
+      `;
+
+      document.getElementById('to-pack').addEventListener('click', () => openPack(pack.id));
+      page.querySelectorAll('.kind-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+          if (tab.dataset.kind !== kind) browseMods(pack, tab.dataset.kind);
+        });
+      });
+
+      const button = document.getElementById('get-shader-loader');
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        button.textContent = t('packs.installing');
+
+        const result = await window.api.installMod(pack.id, 'modrinth', support.projectId, 'mod');
+        if (result.ok && result.installed.some(entry => entry.ok)) return browseMods(pack, 'shader');
+
+        button.textContent = t('packs.shaderLoaderFailed');
+      });
+      return;
+    }
+  }
 
   page.innerHTML = `
     <div class="browse-head">
@@ -272,6 +322,7 @@ async function browseMods(pack, kind = 'mod') {
 
       <input type="text" id="mod-search" class="browse-search" placeholder="${t('packs.searchPlaceholder')}">
       <p class="browse-hint">${kind === 'mod' ? t('packs.searchHint') : t('packs.searchHintPacks')}</p>
+      ${kind === 'shader' ? `<p class="browse-hint">${t('packs.shadersHowTo')}</p>` : ''}
     </div>
 
     <div class="browse-body">

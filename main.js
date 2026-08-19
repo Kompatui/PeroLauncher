@@ -577,6 +577,14 @@ ipcMain.handle('remove-instance-mod', (event, id, filename, kind) => {
 
 ipcMain.handle('get-mod-categories', () => modrinthCategories());
 
+ipcMain.handle('get-shader-support', (event, id) => {
+  const instance = loadInstances().instances.find(entry => entry.id === id);
+  if (!instance) return { ready: false };
+
+  const needed = shaderLoaderFor(instance);
+  return { ready: hasShaderLoader(instance), projectId: needed.id, name: needed.name };
+});
+
 ipcMain.handle('search-mods', async (event, id, query, offset, categories, kind) => {
   const instance = loadInstances().instances.find(entry => entry.id === id);
   if (!instance) return { error: 'no-instance' };
@@ -828,12 +836,40 @@ function loaderTags(loader) {
 // entirely, which is why asking only for mods made them impossible to find.
 const CONTENT_KINDS = {
   mod: { type: 'mod', folder: 'mods', extension: '.jar' },
-  resourcepack: { type: 'resourcepack', folder: 'resourcepacks', extension: '.zip' }
+  resourcepack: { type: 'resourcepack', folder: 'resourcepacks', extension: '.zip' },
+  shader: { type: 'shader', folder: 'shaderpacks', extension: '.zip' }
 };
 
-// Texture packs are made for the game, not for a loader.
+// Texture packs are made for the game, not for a loader; shaders are made for
+// the mod that renders them, which is a different thing again.
 function kindLoaders(kind, instance) {
-  return kind === 'resourcepack' ? ['minecraft'] : loaderTags(instance.loader);
+  if (kind === 'resourcepack') return ['minecraft'];
+  if (kind === 'shader') return ['iris', 'optifine'];
+  return loaderTags(instance.loader);
+}
+
+// A shader is not a mod and does nothing on its own: something has to render
+// it. Iris does that on Fabric, Quilt and NeoForge, Oculus on Forge. Rather
+// than hide the shaders from a pack that has neither, the launcher says what
+// is missing and offers to fetch it.
+const SHADER_LOADERS = {
+  iris: { id: 'YL57xq9U', name: 'Iris' },
+  oculus: { id: 'GchcoXML', name: 'Oculus' }
+};
+
+function shaderLoaderFor(instance) {
+  return instance.loader === 'forge' ? SHADER_LOADERS.oculus : SHADER_LOADERS.iris;
+}
+
+// Whether this pack can already show a shader. The file name is checked as
+// well as our own record, because a player may have put the mod there by hand
+// and would rightly expect that to count.
+function hasShaderLoader(instance) {
+  return listInstanceContent(instance, 'mod').some(mod =>
+    mod.projectId === SHADER_LOADERS.iris.id ||
+    mod.projectId === SHADER_LOADERS.oculus.id ||
+    /\b(iris|oculus|optifine)\b/i.test(mod.filename)
+  );
 }
 
 // The categories each kind is filed under, taken from Modrinth rather than

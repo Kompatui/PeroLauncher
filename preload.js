@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('api', {
   listInstanceMods: (id, kind) => ipcRenderer.invoke('list-instance-mods', id, kind),
   removeInstanceMod: (id, filename, kind) => ipcRenderer.invoke('remove-instance-mod', id, filename, kind),
   getModCategories: () => ipcRenderer.invoke('get-mod-categories'),
+  getShaderSupport: (id) => ipcRenderer.invoke('get-shader-support', id),
   searchMods: (id, query, offset, categories, kind) => ipcRenderer.invoke('search-mods', id, query, offset, categories, kind),
   installMod: (id, source, projectId, kind) => ipcRenderer.invoke('install-mod', id, source, projectId, kind),
   openCrashReports: () => ipcRenderer.invoke('open-crash-reports'),

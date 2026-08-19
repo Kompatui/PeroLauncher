@@ -231,6 +231,18 @@ function createWindow() {
   win.loadFile('index.html');
   win.webContents.openDevTools({ mode: 'right' });
 
+  // A page that throws goes white and says nothing: its errors land in the
+  // developer tools, while the terminal only ever hears from this process.
+  // Repeating them here means a blank screen comes with its reason attached.
+  win.webContents.on('console-message', (event, level, message, line, source) => {
+    if (level < 2) return;   // Warnings and errors only.
+    console.log(`[PAGE] ${message}   (${source}:${line})`);
+  });
+
+  win.webContents.on('render-process-gone', (event, details) => {
+    console.log('[PAGE] the page process stopped:', details.reason);
+  });
+
   win.on('maximize', () => win.webContents.send('window-state', true));
   win.on('unmaximize', () => win.webContents.send('window-state', false));
 
@@ -258,18 +270,39 @@ ipcMain.handle('save-settings', (event, settings) => {
   return true;
 });
 
+// The total and the automatic figure come from the same place, so the number
+// on the settings page cannot drift away from the one the game is started
+// with. They were worked out twice before, in two files, agreeing only by
+// coincidence.
 ipcMain.handle('get-system-ram', () => {
-  return Math.floor(os.totalmem() / 1024 / 1024);
+  return { total: Math.floor(os.totalmem() / 1024 / 1024), auto: autoRamMB() };
 });
 
-// Half the machine, never eating into the last 2 GB. Deliberately measured
-// against total memory, not free memory: -Xmx is a ceiling the game grows into,
-// not memory taken up front, and every normal launcher lets you set more than
-// is free at the moment. Clamping to free memory would also lock the game into
-// a tiny heap just because a browser happened to be open at launch.
+// More heap is not more game. Above roughly this much, Minecraft gains
+// nothing and loses something: the pauses to collect a larger heap get longer
+// and show up as stutter. Which is why launchers hand out a fixed few
+// gigabytes rather than a share of whatever the machine happens to have -
+// Mojang's own gives every version 2 GiB, MultiMC and Prism 4.
+const AUTO_RAM_CEILING_MB = 4096;
+
+// Measured against total memory, not free memory: -Xmx is a ceiling the game
+// grows into, not memory taken up front, and every normal launcher lets you
+// set more than is free at the moment. Clamping to free memory would also
+// lock the game into a tiny heap just because a browser happened to be open.
+//
+// Nothing here looks at the game version, and that is on purpose. What
+// decides the appetite is the mods, not the version: bare 1.20 is happy in
+// 2 GiB while 1.7.10 under a heavy pack will not fit in 4. A version says
+// almost nothing about it, so the figure belongs to the modpack instead -
+// which is where it will come from once modpacks exist.
 function autoRamMB() {
   const totalMB = Math.floor(os.totalmem() / 1024 / 1024);
-  return Math.max(1024, Math.round(Math.min(totalMB / 2, totalMB - 2048) / 512) * 512);
+
+  // Half the machine, and never so much that the system is left under 2 GB.
+  const share = Math.min(totalMB / 2, totalMB - 2048);
+  const rounded = Math.round(share / 512) * 512;
+
+  return Math.max(1024, Math.min(rounded, AUTO_RAM_CEILING_MB));
 }
 
 ipcMain.handle('pick-folder', async () => {
@@ -397,11 +430,15 @@ ipcMain.handle('get-session', async () => {
   }
 });
 
-ipcMain.handle('launch-game', async (event, profile) => {
+ipcMain.handle('launch-game', (event, profile) => startGame(profile));
+
+// ramOverride is set when the launcher is having a second go with a smaller
+// heap, after Java refused to start with the first one.
+async function startGame(profile, ramOverride) {
   const settings = loadSettings();
   const launcher = new Client();
 
-  const effectiveRam = settings.ramAuto ? autoRamMB() : settings.ram;
+  const effectiveRam = ramOverride || (settings.ramAuto ? autoRamMB() : settings.ram);
 
   const opts = {
     authorization: profile.mclc,
@@ -568,11 +605,19 @@ ipcMain.handle('launch-game', async (event, profile) => {
     }
 
     if (code === 0) return;
-    reportGameCrash(code, recentOutput.join('\n'), effectiveRam, freeAtLaunch);
+
+    // The last words arrive after the process is already gone. Judging the
+    // crash the instant it closes meant reading a report with its ending
+    // missing - which is how a plain "exit code 1" was shown for a failure
+    // that had said exactly what was wrong a moment later.
+    setTimeout(
+      () => reportGameCrash(code, recentOutput.join('\n'), effectiveRam, freeAtLaunch, profile),
+      300
+    );
   });
 
   return { started: true, error: null };
-});
+}
 
 // Minecraft writes its own account of a crash here, and it says far more than
 // the last lines of output ever can.
@@ -726,10 +771,61 @@ function useConfigOf(gameFolder, versionKey) {
   fs.writeFileSync(ownerFile, key);
 }
 
+// Java refusing to start at all because the heap it was asked for will not
+// fit. Nothing has run yet, nothing is lost, and a smaller heap would work -
+// which is why this is worth telling apart from a game that died mid-play.
+// Either line is proof enough on its own terms. Demanding both missed the
+// real thing: the process died so fast that "Could not create the Java
+// Virtual Machine" never reached us, and the player got a bare exit code for
+// a problem the launcher could have fixed in one click.
+function heapTooBigToStart(output) {
+  const failedToStart = /Error occurred during initialization of VM|Could not create the Java Virtual Machine/i.test(output);
+  const aboutMemory = /Unable to allocate|Could not reserve enough space|insufficient memory|Failed to allocate|object heap/i.test(output);
+  return failedToStart && aboutMemory;
+}
+
+// A heap that stands a chance this time. Java needs room for the heap itself
+// plus its own bookkeeping, so it asks for rather more than the number given.
+function smallerHeap(effectiveRam, freeAtLaunch) {
+  const fromFree = Math.floor((freeAtLaunch - 768) / 512) * 512;
+  const fromLast = Math.floor((effectiveRam * 0.6) / 512) * 512;
+  return Math.max(1024, Math.min(fromFree, fromLast));
+}
+
 // Without this the launcher stays silent and the game just blinks and
 // disappears, which tells the player nothing at all.
-function reportGameCrash(code, output, effectiveRam, freeAtLaunch) {
+function reportGameCrash(code, output, effectiveRam, freeAtLaunch, profile) {
   const t = loadTranslations(currentLocale);
+
+  // Which reading of the crash was taken, so a wrong one can be seen from the
+  // terminal instead of guessed at from the dialog that followed.
+  console.log(`[CRASH] exit ${code}, ${output.length} chars captured, ` +
+    `heap-too-big-to-start: ${heapTooBigToStart(output)}`);
+
+  // The game never started: Java would not take the heap.
+  if (heapTooBigToStart(output)) {
+    const retryWith = smallerHeap(effectiveRam, freeAtLaunch);
+
+    const answer = dialog.showMessageBoxSync({
+      type: 'warning',
+      title: t['crash.title'],
+      message: t['crash.heapTooBigShort'],
+      detail: `${t['crash.heapTooBig']}\n\n` +
+        `${t['crash.givenRam']}: ${effectiveRam} ${t['settings.mib']}\n` +
+        `${t['crash.freeAtLaunch']}: ${freeAtLaunch} ${t['settings.mib']}\n\n` +
+        `${t['crash.heapIsNotAll']}`,
+      buttons: [`${t['crash.retryWith']} ${retryWith} ${t['settings.mib']}`, t['crash.giveUp']],
+      defaultId: 0,
+      cancelId: 1
+    });
+
+    // Only this once, and only for this launch - the setting is left alone,
+    // because a machine with a browser closed will take the larger figure
+    // again tomorrow.
+    if (answer === 0 && profile) startGame(profile, retryWith);
+    return;
+  }
+
   const outOfMemory = /insufficient memory|OutOfMemoryError|failed to allocate/i.test(output);
 
   const detail = outOfMemory

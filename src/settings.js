@@ -26,10 +26,13 @@ window.api.isMaximized().then(renderMaxIcon);
 
 let settings = {};
 let totalSystemRamMB = 8192;
+let autoRamMB = 4096;
 
 async function loadSettingsUI() {
   settings = await window.api.getSettings();
-  totalSystemRamMB = await window.api.getSystemRam();
+  const memory = await window.api.getSystemRam();
+  totalSystemRamMB = memory.total;
+  autoRamMB = memory.auto;
 
   document.getElementById('current-version').textContent = settings.version;
   document.getElementById('current-gamefolder').textContent = settings.gameFolder;
@@ -81,11 +84,11 @@ function renderTranslatedValues() {
 
 document.addEventListener('translations-applied', renderTranslatedValues);
 
+// Worked out by the launcher itself and simply shown here. Computing it a
+// second time in this file is how the page and the game could have started
+// disagreeing without anyone noticing.
 function autoRamValue() {
-  const half = Math.floor(totalSystemRamMB / 2);
-  const capped = Math.min(half, totalSystemRamMB - 2048);
-  const rounded = Math.max(1024, Math.round(capped / 512) * 512);
-  return rounded;
+  return autoRamMB;
 }
 
 function updateRamDisabledState() {

@@ -100,5 +100,9 @@
   "crashes.openFolder": "Open the folder",
   "crashes.showFile": "Show the file",
   "crashes.back": "Back to the list",
-  "crashes.trimmed": "This is the start of the file; the rest is technical detail. \"Show the file\" opens all of it."
+  "crashes.trimmed": "This is the start of the file; the rest is technical detail. \"Show the file\" opens all of it.",
+  "crash.heapTooBigShort": "Not enough memory to start",
+  "crash.heapTooBig": "Java could not take as much memory as it was given, and the game never began to start. Nothing is lost - it will start with a smaller figure.",
+  "crash.retryWith": "Start with",
+  "crash.giveUp": "Do not start"
 }

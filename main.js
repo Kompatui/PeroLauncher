@@ -219,6 +219,10 @@ ipcMain.handle('launch-game', async (event, profile) => {
         await loader.ensureFmlLibraries(
           settings.version, settings.loaderVersion, settings.gameFolder
         );
+        reconcileLanguageOption(
+          settings.gameFolder,
+          path.join(settings.gameFolder, 'versions', opts.version.custom, `${opts.version.custom}.jar`)
+        );
 
         // Forge of that era ignores --gameDir entirely and works out the game
         // folder on its own, landing in %APPDATA%\.minecraft. This property is
@@ -889,6 +893,33 @@ async function archivedUrls(originalUrl) {
     .map(row => row[1])
     .reverse()
     .map(timestamp => `https://web.archive.org/web/${timestamp}id_/${originalUrl}`);
+}
+
+// Old versions read their language file straight out of the jar, where names
+// are case sensitive - en_US.lang. Modern versions write "lang:en_us" into the
+// options.txt they all share, and 1.5.2 then looks for a file that is not
+// there and dies with a null stream. The setting is put back into the spelling
+// this version understands; a modern version will write its own back later.
+function reconcileLanguageOption(gameFolder, jarPath) {
+  const optionsPath = path.join(gameFolder, 'options.txt');
+  if (!fs.existsSync(optionsPath)) return;
+
+  const text = fs.readFileSync(optionsPath, 'utf-8');
+  const line = text.match(/^lang:(.*)$/m);
+  if (!line) return;
+
+  const wanted = line[1].trim();
+  const available = new AdmZip(jarPath).getEntries()
+    .map(entry => entry.entryName)
+    .filter(name => name.startsWith('lang/') && name.endsWith('.lang'))
+    .map(name => name.slice(5, -5));
+
+  if (available.length === 0 || available.includes(wanted)) return;
+
+  const corrected = available.find(name => name.toLowerCase() === wanted.toLowerCase())
+    || (available.includes('en_US') ? 'en_US' : available[0]);
+
+  fs.writeFileSync(optionsPath, text.replace(/^lang:.*$/m, `lang:${corrected}`));
 }
 
 // Vanilla jar with the loader's files laid over it. The signatures have to go:

@@ -59,5 +59,7 @@
   "crash.heapIsNotAll": "Der Wert oben ist die Obergrenze für das Spiel selbst. Zusätzlich benötigt Java Speicher für Texturen und internen Bedarf, meist weitere 0,5-1,5 GB. Mehr freier Speicher als zugewiesen bedeutet daher noch nicht, dass es reicht.",
   "settings.jarmods": "Jar-Mods",
   "jarmods.empty": "Ordner ist leer - öffnen",
-  "jarmods.notForThisVersion": "Nur für Versionen vor 1.6"
+  "jarmods.notForThisVersion": "Nur für Versionen vor 1.6",
+  "jarmods.needsModLoaderTitle": "ModLoader wird benötigt",
+  "jarmods.needsModLoader": "Forge für diese Spielversion funktioniert nicht allein: Es baute auf ModLoader auf und startet ohne ihn nicht. ModLoader ist die Mod eines anderen und darf von uns nicht verteilt werden - besorge die Datei selbst und lege sie in diesen Ordner:"
 }

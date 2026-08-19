@@ -338,7 +338,19 @@ async function checkFmlLibraries(mcVersion, build) {
 
   const required = readFmlLibraryList(archive);
   if (required === null) {
-    return { state: 'warn', note: 'no FML in this build - needs ModLoader, which the launcher does not supply' };
+    // No FML yet. Whether that matters depends on the build, not the version:
+    // Forge absorbed ModLoader partway through the 1.2.5 line, so its early
+    // builds call into ModLoader without carrying it and the late ones ship it.
+    const zip = new AdmZip(archive);
+    const carriesModLoader = !!zip.getEntry('ModLoader.class');
+    const callsModLoader = zip.getEntries().some(entry =>
+      entry.entryName.endsWith('.class') &&
+      entry.getData().toString('latin1').includes('ModLoader'));
+
+    if (callsModLoader && !carriesModLoader) {
+      return { state: 'warn', note: 'calls ModLoader without carrying it - the player must supply it in jarmods/' };
+    }
+    return { state: 'ok', note: carriesModLoader ? 'ModLoader included in the build' : 'no separate libraries needed' };
   }
 
   // Only FML 5 and later use the deobfuscation map; asking for it on 1.3 or

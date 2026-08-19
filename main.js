@@ -245,6 +245,16 @@ ipcMain.handle('launch-game', async (event, profile) => {
         opts.forge = await loader.ensureInstaller(settings.version, settings.loaderVersion);
       }
     } catch (e) {
+      if (e.message === 'needs-modloader') {
+        const t = loadTranslations(currentLocale);
+        dialog.showMessageBox({
+          type: 'info',
+          title: t['jarmods.needsModLoaderTitle'],
+          message: t['jarmods.needsModLoaderTitle'],
+          detail: `${t['jarmods.needsModLoader']}\n\n${path.join(settings.gameFolder, 'jarmods')}`
+        });
+        return { started: false, error: 'needs-modloader' };
+      }
       return { started: false, error: `loader: ${e.message}` };
     }
   } else if (forgeUsesJarMod(settings.version) && listUserJarMods(settings.gameFolder).length > 0) {
@@ -993,14 +1003,36 @@ async function installLegacyProfile(mcVersion, gameFolder, profileId, loaderArch
   const layers = userMods.map(file => fs.readFileSync(file));
   if (loaderArchive) layers.push(loaderArchive);
 
+  const patched = buildJarMod(vanillaJar, layers);
+
+  // Forge before 1.3 calls into ModLoader without carrying it, so a jar built
+  // without it starts and dies on a missing class. Saying so plainly here beats
+  // letting the player decode a Java stack trace.
+  if (missingModLoader(patched)) {
+    throw new Error('needs-modloader');
+  }
+
   fs.mkdirSync(directory, { recursive: true });
-  fs.writeFileSync(jarPath, buildJarMod(vanillaJar, layers));
+  fs.writeFileSync(jarPath, patched);
   fs.writeFileSync(stampPath, stamp);
 
   // The vanilla description, renamed. Everything the mods add already lives
   // inside the patched jar, so nothing else has to be declared.
   fs.writeFileSync(jsonPath, JSON.stringify({ ...meta, id: profileId }, null, 2));
   return profileId;
+}
+
+// True when something in the jar calls ModLoader but nothing provides it.
+// Forge of 1.1 and 1.2.5 was a layer on top of ModLoader rather than a
+// replacement for it, and shipped without it - the player installed both.
+function missingModLoader(patchedJar) {
+  const zip = new AdmZip(patchedJar);
+  if (zip.getEntry('ModLoader.class')) return false;
+
+  return zip.getEntries().some(entry =>
+    entry.entryName.endsWith('.class') &&
+    entry.getData().toString('latin1').includes('ModLoader')
+  );
 }
 
 // Files the player drops in themselves. Mods of that era - ModLoader, Optifine,

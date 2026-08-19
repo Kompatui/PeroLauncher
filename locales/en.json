@@ -59,5 +59,7 @@
   "crash.heapIsNotAll": "The figure above is the ceiling for the game itself. On top of it Java needs memory for textures and its own housekeeping, usually another 0.5-1.5 GB. So more free memory than allocated is still not necessarily enough.",
   "settings.jarmods": "Jar mods",
   "jarmods.empty": "Folder is empty - open it",
-  "jarmods.notForThisVersion": "Only for versions before 1.6"
+  "jarmods.notForThisVersion": "Only for versions before 1.6",
+  "jarmods.needsModLoaderTitle": "ModLoader is required",
+  "jarmods.needsModLoader": "Forge for this game version does not work on its own: it was built on top of ModLoader and will not start without it. ModLoader is someone else's mod and we are not allowed to distribute it, so find the file yourself and put it in this folder:"
 }

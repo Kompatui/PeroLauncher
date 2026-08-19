@@ -909,22 +909,35 @@ async function placeFmlLibrary(library, libDirectory) {
 // Every archived capture of a long-dead address, newest first. Only captures
 // that answered 200 at the time are worth trying, and even those sometimes
 // fail to replay, so the caller walks the list.
-async function archivedUrls(originalUrl) {
+//
+// The index needs its own retries. It answers 200 with an empty body often
+// enough - the same query returns six captures one minute and nothing the
+// next - and an empty answer is indistinguishable from "this was never
+// archived" unless it is asked again. Believing the first empty reply is how
+// a file that is perfectly available turns into "cannot obtain".
+async function archivedUrls(originalUrl, attempts = 3) {
   const index = 'https://web.archive.org/cdx/search/cdx' +
     `?url=${encodeURIComponent(originalUrl)}&output=json&filter=statuscode:200&limit=-6`;
 
-  let rows;
-  try {
-    rows = await fetchJson(index);
-  } catch {
-    return [];
-  }
-  if (!Array.isArray(rows) || rows.length < 2) return [];
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    let rows;
+    try {
+      rows = await fetchJson(index);
+    } catch {
+      rows = null;
+    }
 
-  return rows.slice(1)
-    .map(row => row[1])
-    .reverse()
-    .map(timestamp => `https://web.archive.org/web/${timestamp}id_/${originalUrl}`);
+    if (Array.isArray(rows) && rows.length >= 2) {
+      return rows.slice(1)
+        .map(row => row[1])
+        .reverse()
+        .map(timestamp => `https://web.archive.org/web/${timestamp}id_/${originalUrl}`);
+    }
+
+    if (attempt < attempts) await new Promise(done => setTimeout(done, 2000));
+  }
+
+  return [];
 }
 
 // Old versions read their language file straight out of the jar, where names

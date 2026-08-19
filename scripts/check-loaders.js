@@ -10,6 +10,12 @@
 // download actually contains what the launcher needs - before a player runs
 // into it.
 //
+// "The file downloads" is not the question. The question is whether the game
+// would start, and those came apart once already: every archive for 1.6 to
+// 1.11 downloaded fine, so this script called them ready, and the game still
+// died on a library nobody had fetched. So each era is checked all the way
+// down to the last file it needs.
+//
 //   node scripts/check-loaders.js
 //   node scripts/check-loaders.js 1.7.10 1.12.2 1.20
 
@@ -18,7 +24,7 @@ const { createHash } = require('crypto');
 
 const VERSIONS = process.argv.slice(2).length
   ? process.argv.slice(2)
-  : ['1.5.2', '1.7.10', '1.11.2', '1.12.2', '1.16.5', '1.20', '1.21.1', '26.2'];
+  : ['1.5.2', '1.6.4', '1.7.10', '1.11.2', '1.12.2', '1.16.5', '1.20', '1.21.1', '26.2'];
 
 const FORGE_MAVEN = 'https://maven.minecraftforge.net/net/minecraftforge/forge';
 const NEOFORGE_MAVEN = 'https://maven.neoforged.net/releases/net/neoforged/neoforge';
@@ -215,7 +221,95 @@ async function checkForge(mcVersion, metadata) {
     return { state: 'broken', note: `${kind} jar has no version.json - try the ${other} jar` };
   }
 
+  // Having the description is not the same as being able to launch: 1.6.4
+  // named guava 14.0 in there, minecraft-launcher-core wrote it into the class
+  // path without downloading it, and the game died on a missing class. So for
+  // the era where the launcher supplies those libraries itself, check that it
+  // can actually get every one of them.
+  if (kind === 'universal') {
+    const libraries = await checkForgeLibraries(jar);
+    if (libraries.state !== 'ok') {
+      return { state: libraries.state, note: `${newest}, ${kind} jar - ${libraries.note}` };
+    }
+    return { state: 'ok', note: `${newest}, ${kind} jar, ${libraries.note}` };
+  }
+
   return { state: 'ok', note: `${newest}, ${kind} jar` };
+}
+
+// The same three hosts main.js draws from, in the same order.
+const FORGE_LIBRARY_SOURCES = [
+  'https://maven.minecraftforge.net/',
+  'https://libraries.minecraft.net/',
+  'https://repo1.maven.org/maven2/'
+];
+
+// Libraries repeat heavily across Forge builds, so each path is resolved once.
+const forgeLibraryResults = new Map();
+
+async function canGetForgeLibrary(relative, ownUrl) {
+  if (forgeLibraryResults.has(relative)) return forgeLibraryResults.get(relative);
+
+  const sources = ownUrl ? [ownUrl, ...FORGE_LIBRARY_SOURCES] : FORGE_LIBRARY_SOURCES;
+  let outcome = { ok: false };
+
+  for (const base of sources) {
+    const url = base + relative;
+    try {
+      // A HEAD is enough to answer "is this file there" and saves pulling
+      // megabytes for a question about existence.
+      await request(url, { method: 'HEAD' });
+      outcome = { ok: true, host: base.split('/')[2] };
+      break;
+    } catch (e) {
+      if (e.fromServer) continue;   // The host says it has no such file.
+      try {
+        await getBuffer(url);       // Some hosts refuse HEAD but serve GET.
+        outcome = { ok: true, host: base.split('/')[2] };
+        break;
+      } catch {
+        // Try the next host.
+      }
+    }
+  }
+
+  forgeLibraryResults.set(relative, outcome);
+  return outcome;
+}
+
+// Reads the requirement out of the build itself and mirrors the launcher's
+// skip rules: natives come from MCLC's own copies, and Forge hands over its
+// own jar rather than fetching it from a repository.
+async function checkForgeLibraries(jar) {
+  const entry = new AdmZip(jar).getEntry('version.json');
+  let json;
+  try {
+    json = JSON.parse(entry.getData().toString('utf-8'));
+  } catch (e) {
+    return { state: 'broken', note: `version.json is unreadable: ${e.message}` };
+  }
+
+  const missing = [];
+  let checked = 0;
+  const hosts = new Set();
+
+  for (const library of json.libraries || []) {
+    if (library.natives) continue;
+
+    const [group, artifact, version] = library.name.split(':');
+    if (group === 'net.minecraftforge') continue;
+
+    const relative = `${group.replace(/\./g, '/')}/${artifact}/${version}/${artifact}-${version}.jar`;
+    const result = await canGetForgeLibrary(relative, library.url);
+    checked++;
+    if (result.ok) hosts.add(result.host);
+    else missing.push(library.name);
+  }
+
+  if (missing.length) {
+    return { state: 'broken', note: `cannot obtain ${missing.length} of ${checked} libraries: ${missing.join(', ')}` };
+  }
+  return { state: 'ok', note: `${checked} libraries from ${[...hosts].join(' + ')}` };
 }
 
 async function checkNeoforge(mcVersion, metadata) {
@@ -280,17 +374,30 @@ function readFmlLibraryList(archive) {
   return names.map((name, index) => ({ name, sha1: hashes[index] || null }));
 }
 
-async function archivedUrls(originalUrl) {
+// Retried like main.js does, and for the same reason: the index answers 200
+// with an empty body often enough that one empty reply proves nothing. Taking
+// it at face value made this script report 1.5.2 as broken over a file that
+// was there all along.
+async function archivedUrls(originalUrl, attempts = 3) {
   const index = 'https://web.archive.org/cdx/search/cdx' +
     `?url=${encodeURIComponent(originalUrl)}&output=json&filter=statuscode:200&limit=-6`;
-  try {
-    const rows = await getJson(index);
-    if (!Array.isArray(rows) || rows.length < 2) return [];
-    return rows.slice(1).map(row => row[1]).reverse()
-      .map(stamp => `https://web.archive.org/web/${stamp}id_/${originalUrl}`);
-  } catch {
-    return [];
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    let rows = null;
+    try {
+      rows = await getJson(index);
+    } catch {
+      // Treated the same as an empty answer: ask again.
+    }
+
+    if (Array.isArray(rows) && rows.length >= 2) {
+      return rows.slice(1).map(row => row[1]).reverse()
+        .map(stamp => `https://web.archive.org/web/${stamp}id_/${originalUrl}`);
+    }
+
+    if (attempt < attempts) await sleep(2000);
   }
+  return [];
 }
 
 // Libraries repeat across versions, so a name is only ever resolved once.

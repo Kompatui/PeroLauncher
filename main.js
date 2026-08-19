@@ -651,6 +651,39 @@ async function startGame(profile, ramOverride) {
   const settings = loadSettings();
   const launcher = new Client();
 
+  const launcherWindow = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+
+  // Everything between the click and the game window used to happen in
+  // silence - minutes of it - so a step that failed looked exactly like a
+  // click that never registered. It is said out loud now.
+  const say = (stage, info = {}) => {
+    if (launcherWindow && !launcherWindow.isDestroyed()) {
+      launcherWindow.webContents.send('launch-progress', { stage, ...info });
+    }
+  };
+
+  // A failure has to reach the player. It used to reach the console, which
+  // nobody has open, and the launcher simply appeared to do nothing.
+  const fail = (reason, detail) => {
+    say('failed');
+    const t = loadTranslations(currentLocale);
+
+    // A 404 is the server saying it has no such thing, and trying again will
+    // not change its mind. Telling the player to retry would send them round
+    // in circles - the same distinction the retries themselves observe.
+    const missing = /HTTP 404/.test(detail);
+
+    dialog.showMessageBox({
+      type: 'warning',
+      title: t['launch.failedTitle'],
+      message: t[`launch.failed.${reason}`] || t['launch.failedTitle'],
+      detail: missing ? t['launch.notPublished'] : `${detail}\n\n${t['launch.mayBeConnection']}`
+    });
+    return { started: false, error: `${reason}: ${detail}` };
+  };
+
+  say('preparing');
+
   // A chosen pack answers for its own version, loader and folder. Nothing
   // else changes: the same code launches both paths, so a pack cannot end up
   // on a route the plain one has not already proved.
@@ -687,16 +720,18 @@ async function startGame(profile, ramOverride) {
 
   // Picking the wrong Java is what silently kills the game: Forge for 1.20
   // dies on Java 25 with "Unsupported class file major version 69".
+  say('java');
   try {
     opts.javaPath = await resolveJavaPath(settings.version, settings.javaPath);
   } catch (e) {
-    return { started: false, error: `java: ${e.message}` };
+    return fail('java', e.message);
   }
 
   // The loader is fetched here rather than when it is picked, so browsing the
   // list costs nothing. Both kinds sit on top of the vanilla version.
   const loader = modLoaders[settings.loader];
   if (loader && settings.loaderVersion) {
+    say('loader', { name: settings.loader, version: settings.loaderVersion });
     try {
       const kind = loader.kindFor(settings.version);
 
@@ -751,9 +786,11 @@ async function startGame(profile, ramOverride) {
           message: t['jarmods.needsModLoaderTitle'],
           detail: `${t['jarmods.needsModLoader']}\n\n${path.join(settings.gameFolder, 'jarmods')}`
         });
+        say('failed');
+        say('failed');
         return { started: false, error: 'needs-modloader' };
       }
-      return { started: false, error: `loader: ${e.message}` };
+      return fail('loader', e.message);
     }
   } else if (forgeUsesJarMod(settings.version) && listUserJarMods(settings.gameFolder).length > 0) {
     // No loader picked, but the player has put jar mods in place - on these
@@ -771,7 +808,7 @@ async function startGame(profile, ramOverride) {
         `-Dminecraft.applet.TargetDirectory=${settings.gameFolder}`
       ];
     } catch (e) {
-      return { started: false, error: `jarmods: ${e.message}` };
+      return fail('jarmods', e.message);
     }
   }
 
@@ -793,9 +830,15 @@ async function startGame(profile, ramOverride) {
     opts.customArgs = [...(opts.customArgs || []), ...extraArgs.split(/\s+/)];
   }
 
+  say('files', { type: '', done: 0, total: 0 });
   launcher.launch(opts);
 
   launcher.on('debug', (e) => console.log('[DEBUG]', e));
+
+  // What the launcher is fetching and how far along it is. This is the part
+  // that takes the minutes: the game jar, its libraries, and several thousand
+  // small asset files.
+  launcher.on('progress', (e) => say('files', { type: e.type, done: e.task, total: e.total }));
 
   // The game's own output is the only place its reason for dying shows up,
   // so keep the tail of it around for the report below.
@@ -813,18 +856,23 @@ async function startGame(profile, ramOverride) {
   // Getting out of the way, but only once the game is actually on screen -
   // minimising while it is still downloading would leave the player looking
   // at an empty desktop with no sign that anything is happening.
-  const launcherWindow = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
   let steppedAside = false;
 
+  // The first word out of the game means it is running: the downloading is
+  // over and the window is on its way.
   launcher.on('data', () => {
     if (steppedAside || !launcherWindow || launcherWindow.isDestroyed()) return;
     steppedAside = true;
+
+    say('running');
 
     if (settings.onGameStart === 'minimize') launcherWindow.minimize();
     else if (settings.onGameStart === 'close') app.quit();
   });
 
   launcher.on('close', (code) => {
+    say('ended');
+
     // Back where it was. A crash is exactly when the launcher is wanted
     // again, so this happens before the report below.
     if (settings.onGameStart === 'minimize' && launcherWindow && !launcherWindow.isDestroyed()) {

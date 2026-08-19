@@ -230,5 +230,15 @@
   "packs.installPack": "Установить",
   "packs.installingPack": "Устанавливаю сборку",
   "packs.downloadingPack": "Скачиваю сборку…",
-  "packs.unpacking": "Раскладываю файлы…"
+  "packs.unpacking": "Раскладываю файлы…",
+  "launch.preparing": "Готовлю запуск…",
+  "launch.java": "Проверяю Java…",
+  "launch.loader": "Ставлю загрузчик…",
+  "launch.files": "Скачиваю файлы",
+  "launch.failedTitle": "Запустить не удалось",
+  "launch.failed.java": "Не удалось подготовить Java",
+  "launch.failed.loader": "Не удалось поставить загрузчик модов",
+  "launch.failed.jarmods": "Не удалось собрать игру с jar-модами",
+  "launch.mayBeConnection": "Чаще всего это обрыв связи — попробуйте ещё раз. Если повторяется, проверьте выбранную версию и загрузчик в настройках.",
+  "launch.notPublished": "Такой сборки загрузчика нет на сервере — повторять бесполезно. Выберите другую версию загрузчика в настройках."
 }

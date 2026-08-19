@@ -230,5 +230,15 @@
   "packs.installPack": "Install",
   "packs.installingPack": "Installing the pack",
   "packs.downloadingPack": "Downloading the pack…",
-  "packs.unpacking": "Laying out the files…"
+  "packs.unpacking": "Laying out the files…",
+  "launch.preparing": "Getting ready…",
+  "launch.java": "Checking Java…",
+  "launch.loader": "Installing the loader…",
+  "launch.files": "Downloading files",
+  "launch.failedTitle": "The game did not start",
+  "launch.failed.java": "Java could not be prepared",
+  "launch.failed.loader": "The mod loader could not be installed",
+  "launch.failed.jarmods": "The game could not be built with the jar mods",
+  "launch.mayBeConnection": "Usually this is the connection dropping - try again. If it keeps happening, check the version and loader in the settings.",
+  "launch.notPublished": "That loader build is not on the server, and asking again will not change it. Pick a different loader build in the settings."
 }

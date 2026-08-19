@@ -230,5 +230,15 @@
   "packs.installPack": "Installieren",
   "packs.installingPack": "Pack wird installiert",
   "packs.downloadingPack": "Pack wird geladen…",
-  "packs.unpacking": "Dateien werden abgelegt…"
+  "packs.unpacking": "Dateien werden abgelegt…",
+  "launch.preparing": "Start wird vorbereitet…",
+  "launch.java": "Java wird geprüft…",
+  "launch.loader": "Loader wird installiert…",
+  "launch.files": "Dateien werden geladen",
+  "launch.failedTitle": "Das Spiel ist nicht gestartet",
+  "launch.failed.java": "Java konnte nicht vorbereitet werden",
+  "launch.failed.loader": "Der Mod-Loader konnte nicht installiert werden",
+  "launch.failed.jarmods": "Das Spiel konnte nicht mit den Jar-Mods gebaut werden",
+  "launch.mayBeConnection": "Meist ist es die Verbindung - versuche es erneut. Wenn es bleibt, prüfe Version und Loader in den Einstellungen.",
+  "launch.notPublished": "Diesen Loader-Build gibt es auf dem Server nicht - erneutes Versuchen ändert daran nichts. Wähle in den Einstellungen einen anderen."
 }

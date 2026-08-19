@@ -101,6 +101,58 @@ body { font-family: sans-serif; overflow: hidden; }
   object-fit: contain;
 }
 
+/* What the play tile says while it works. The main screen carries no text by
+   design, but a launcher that answers a click with nothing for minutes is
+   worse than one that breaks its own rule for as long as it is busy. */
+.tile-status {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.82);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: #2f6b36;
+  text-align: center;
+}
+
+.tile-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tile-status-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+}
+
+.tile-status-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #2f9e44;
+  transition: width 0.25s ease;
+}
+
+/* Nothing countable to show yet - a bar that crawls says "still working"
+   where an empty one would say "stuck". */
+.tile-status.working .tile-status-bar {
+  background: linear-gradient(90deg, rgba(0,0,0,0.10) 25%, rgba(47,158,68,0.55) 50%, rgba(0,0,0,0.10) 75%);
+  background-size: 200% 100%;
+  animation: tile-status-sweep 1.4s linear infinite;
+}
+
+@keyframes tile-status-sweep {
+  from { background-position: 200% 0; }
+  to   { background-position: 0 0; }
+}
+
 .yellow img { width: 60%; }
 .red img { width: 25%; }
 .green img { width: 20%; }

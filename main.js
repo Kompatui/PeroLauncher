@@ -262,9 +262,13 @@ ipcMain.handle('launch-game', async (event, profile) => {
     if (recentOutput.length > 60) recentOutput.shift();
   });
 
+  // Measured now, not when the game dies: by then the dying process has given
+  // its memory back, and the figure would look like there was plenty.
+  const freeAtLaunch = Math.floor(os.freemem() / 1024 / 1024);
+
   launcher.on('close', (code) => {
     if (code === 0) return;
-    reportGameCrash(code, recentOutput.join('\n'), effectiveRam);
+    reportGameCrash(code, recentOutput.join('\n'), effectiveRam, freeAtLaunch);
   });
 
   return { started: true, error: null };
@@ -272,13 +276,15 @@ ipcMain.handle('launch-game', async (event, profile) => {
 
 // Without this the launcher stays silent and the game just blinks and
 // disappears, which tells the player nothing at all.
-function reportGameCrash(code, output, effectiveRam) {
+function reportGameCrash(code, output, effectiveRam, freeAtLaunch) {
   const t = loadTranslations(currentLocale);
   const outOfMemory = /insufficient memory|OutOfMemoryError|failed to allocate/i.test(output);
 
   const detail = outOfMemory
-    ? `${t['crash.outOfMemory']}\n\n${t['crash.givenRam']}: ${effectiveRam} ${t['settings.mib']}\n` +
-      `${t['crash.freeRam']}: ${Math.floor(os.freemem() / 1024 / 1024)} ${t['settings.mib']}`
+    ? `${t['crash.outOfMemory']}\n\n` +
+      `${t['crash.givenRam']}: ${effectiveRam} ${t['settings.mib']}\n` +
+      `${t['crash.freeAtLaunch']}: ${freeAtLaunch} ${t['settings.mib']}\n\n` +
+      t['crash.heapIsNotAll']
     : `${t['crash.exitCode']}: ${code}\n\n${output.trim().split('\n').slice(-6).join('\n')}`;
 
   dialog.showMessageBox({

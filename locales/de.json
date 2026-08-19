@@ -52,8 +52,9 @@
   "crash.outOfMemoryShort": "Zu wenig Arbeitsspeicher",
   "crash.outOfMemory": "Dem Spiel ging beim Start der Speicher aus. Schließe andere Programme (Browser, Code-Editor) oder verringere den zugewiesenen Speicher in den Einstellungen.",
   "crash.givenRam": "Dem Spiel zugewiesen",
-  "crash.freeRam": "Momentan frei",
   "crash.exitCode": "Exit-Code",
   "loader.checking": "Es wird geprüft, welche Loader es für diese Version gibt…",
-  "java.howItWorks": "Jede Spielversion benötigt ihr eigenes Java. Der Launcher wählt es selbst: Ist ein passendes bereits installiert, wird es verwendet, sonst wird es von Mojang heruntergeladen - und von Adoptium, wenn Mojang nicht erreichbar ist. Heruntergeladene Runtimes bleiben im Launcher-Ordner und werden wiederverwendet."
+  "java.howItWorks": "Jede Spielversion benötigt ihr eigenes Java. Der Launcher wählt es selbst: Ist ein passendes bereits installiert, wird es verwendet, sonst wird es von Mojang heruntergeladen - und von Adoptium, wenn Mojang nicht erreichbar ist. Heruntergeladene Runtimes bleiben im Launcher-Ordner und werden wiederverwendet.",
+  "crash.freeAtLaunch": "Beim Start frei",
+  "crash.heapIsNotAll": "Der Wert oben ist die Obergrenze für das Spiel selbst. Zusätzlich benötigt Java Speicher für Texturen und internen Bedarf, meist weitere 0,5-1,5 GB. Mehr freier Speicher als zugewiesen bedeutet daher noch nicht, dass es reicht."
 }

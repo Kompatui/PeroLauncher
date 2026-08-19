@@ -52,8 +52,9 @@
   "crash.outOfMemoryShort": "Not enough memory",
   "crash.outOfMemory": "The game ran out of memory while starting. Close other programs (browser, code editor) or lower the memory given to the game in the settings.",
   "crash.givenRam": "Given to the game",
-  "crash.freeRam": "Free right now",
   "crash.exitCode": "Exit code",
   "loader.checking": "Checking which loaders exist for this version…",
-  "java.howItWorks": "Each game version needs its own Java. The launcher picks it automatically: if a matching one is already installed it is used, otherwise it is downloaded from Mojang, or from Adoptium when Mojang is unreachable. Downloaded runtimes are kept in the launcher folder and reused."
+  "java.howItWorks": "Each game version needs its own Java. The launcher picks it automatically: if a matching one is already installed it is used, otherwise it is downloaded from Mojang, or from Adoptium when Mojang is unreachable. Downloaded runtimes are kept in the launcher folder and reused.",
+  "crash.freeAtLaunch": "Free at launch",
+  "crash.heapIsNotAll": "The figure above is the ceiling for the game itself. On top of it Java needs memory for textures and its own housekeeping, usually another 0.5-1.5 GB. So more free memory than allocated is still not necessarily enough."
 }

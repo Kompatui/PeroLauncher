@@ -28,9 +28,50 @@ function showStatus(text, fraction) {
 
 function clearStatus() {
   playTile.querySelector('.tile-status')?.remove();
+  playTile.querySelector('.tile-cancel')?.remove();
+  playTile.classList.remove('busy');
 }
 
+// While it works the tile becomes the way to call it off. The arrow would be
+// a lie at that point - pressing it again cannot start what is already
+// starting, so it turns into the only thing left worth doing.
+function showCancel() {
+  playTile.classList.add('busy');
+  if (playTile.querySelector('.tile-cancel')) return;
+
+  const cross = document.createElement('div');
+  cross.className = 'tile-cancel';
+  cross.innerHTML = `<svg viewBox="0 0 48 48" width="64" height="64" aria-hidden="true">
+      <line x1="10" y1="10" x2="38" y2="38" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+      <line x1="38" y1="10" x2="10" y2="38" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+    </svg>`;
+  playTile.appendChild(cross);
+}
+
+// A failure takes over the whole window instead of arriving as a little grey
+// box from the operating system. It is the launcher's own screen, in the
+// launcher's own words, and it cannot be missed.
+const bluescreen = document.getElementById('bluescreen');
+
+function showBluescreen(progress) {
+  document.getElementById('bluescreen-what').textContent = progress.what || t('launch.failedTitle');
+  document.getElementById('bluescreen-why').textContent = progress.why || '';
+
+  // The part for whoever is reading over the player's shoulder.
+  const technical = document.getElementById('bluescreen-technical');
+  technical.textContent = progress.technical ? `${progress.code}: ${progress.technical}` : '';
+  technical.classList.toggle('hidden', !progress.technical);
+
+  document.getElementById('bluescreen-continue').textContent = t('bluescreen.continue');
+  bluescreen.classList.remove('hidden');
+}
+
+document.getElementById('bluescreen-continue').addEventListener('click', () => {
+  bluescreen.classList.add('hidden');
+});
+
 window.api.onLaunchProgress(progress => {
+  if (progress.stage === 'failed' && progress.what) showBluescreen(progress);
   if (progress.stage === 'preparing') showStatus(t('launch.preparing'), null);
   if (progress.stage === 'java') showStatus(t('launch.java'), null);
   if (progress.stage === 'loader') showStatus(t('launch.loader'), null);
@@ -41,16 +82,27 @@ window.api.onLaunchProgress(progress => {
       progress.total ? progress.done / progress.total : null);
   }
 
-  // The game is up: the launcher has nothing left to say.
-  if (progress.stage === 'running' || progress.stage === 'ended' || progress.stage === 'failed') {
+  // The game is up, or it is over: the launcher has nothing left to say.
+  if (['running', 'ended', 'failed', 'cancelled'].includes(progress.stage)) {
     launching = false;
     clearStatus();
   }
 });
 
 playTile.addEventListener('click', async () => {
-  if (launching) return;
+  // Busy means the tile is a stop button, not a dead one. The screen answers
+  // straight away rather than waiting to be told it may: downloading happens
+  // in the same process that handles this click, so a busy launcher can take
+  // the better part of a minute to reply - and the player has already decided.
+  if (launching) {
+    launching = false;
+    clearStatus();
+    window.api.cancelLaunch();
+    return;
+  }
+
   launching = true;
+  showCancel();
   showStatus(t('launch.preparing'), null);
 
   try {

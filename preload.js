@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('api', {
   removeAccount: (id) => ipcRenderer.invoke('remove-account', id),
   getSession: () => ipcRenderer.invoke('get-session'),
   launchGame: (profile) => ipcRenderer.invoke('launch-game', profile),
+  cancelLaunch: () => ipcRenderer.invoke('cancel-launch'),
   openGameFolder: () => ipcRenderer.invoke('open-game-folder'),
   onWindowStateChange: (callback) => ipcRenderer.on('window-state', (event, isMaximized) => callback(isMaximized)),
   isMaximized: () => ipcRenderer.invoke('is-maximized'),

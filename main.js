@@ -645,11 +645,39 @@ ipcMain.handle('install-mod', async (event, id, source, projectId, kind) => {
 
 ipcMain.handle('launch-game', (event, profile) => startGame(profile));
 
+// Answering at once matters more than stopping at once. A download already in
+// flight cannot be interrupted mid-file - and should not be, since the file it
+// finishes is one less to fetch next time - but the player asked to stop, and
+// the screen has to agree with them immediately.
+ipcMain.handle('cancel-launch', (event) => {
+  if (!activeLaunch) return false;
+
+  activeLaunch.cancelled = true;
+  event.sender.send('launch-progress', { stage: 'cancelled' });
+
+  if (activeLaunch.child) {
+    try {
+      activeLaunch.child.kill();
+    } catch (e) {
+      console.log('[LAUNCH] could not stop the game process:', e.message);
+    }
+  }
+  return true;
+});
+
 // ramOverride is set when the launcher is having a second go with a smaller
 // heap, after Java refused to start with the first one.
+// The launch in progress, so it can be called off. Preparing a game takes
+// minutes, and a player who changes their mind should not have to wait it out
+// or kill the launcher.
+let activeLaunch = null;
+
 async function startGame(profile, ramOverride) {
   const settings = loadSettings();
   const launcher = new Client();
+
+  const launch = { cancelled: false, child: null };
+  activeLaunch = launch;
 
   const launcherWindow = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
 
@@ -657,6 +685,10 @@ async function startGame(profile, ramOverride) {
   // silence - minutes of it - so a step that failed looked exactly like a
   // click that never registered. It is said out loud now.
   const say = (stage, info = {}) => {
+    // Once it has been called off, progress reports are noise: they would
+    // keep a tile alive that the player has already dismissed.
+    if (launch.cancelled && stage !== 'cancelled') return;
+
     if (launcherWindow && !launcherWindow.isDestroyed()) {
       launcherWindow.webContents.send('launch-progress', { stage, ...info });
     }
@@ -665,7 +697,6 @@ async function startGame(profile, ramOverride) {
   // A failure has to reach the player. It used to reach the console, which
   // nobody has open, and the launcher simply appeared to do nothing.
   const fail = (reason, detail) => {
-    say('failed');
     const t = loadTranslations(currentLocale);
 
     // A 404 is the server saying it has no such thing, and trying again will
@@ -673,13 +704,22 @@ async function startGame(profile, ramOverride) {
     // in circles - the same distinction the retries themselves observe.
     const missing = /HTTP 404/.test(detail);
 
-    dialog.showMessageBox({
-      type: 'warning',
-      title: t['launch.failedTitle'],
-      message: t[`launch.failed.${reason}`] || t['launch.failedTitle'],
-      detail: missing ? t['launch.notPublished'] : `${detail}\n\n${t['launch.mayBeConnection']}`
+    say('failed', {
+      what: t[`launch.failed.${reason}`] || t['launch.failedTitle'],
+      why: missing ? t['launch.notPublished'] : t['launch.mayBeConnection'],
+      technical: detail,
+      code: reason
     });
     return { started: false, error: `${reason}: ${detail}` };
+  };
+
+  // Checked between steps rather than inside them: a download already under
+  // way is left to finish, and the file it saves is one less to fetch next
+  // time. Stopping mid-file would only leave a broken one behind.
+  const givenUp = () => {
+    if (!launch.cancelled) return false;
+    say('cancelled');
+    return true;
   };
 
   say('preparing');
@@ -726,6 +766,7 @@ async function startGame(profile, ramOverride) {
   } catch (e) {
     return fail('java', e.message);
   }
+  if (givenUp()) return { started: false, error: 'cancelled' };
 
   // The loader is fetched here rather than when it is picked, so browsing the
   // list costs nothing. Both kinds sit on top of the vanilla version.
@@ -830,8 +871,17 @@ async function startGame(profile, ramOverride) {
     opts.customArgs = [...(opts.customArgs || []), ...extraArgs.split(/\s+/)];
   }
 
+  if (givenUp()) return { started: false, error: 'cancelled' };
+
   say('files', { type: '', done: 0, total: 0 });
-  launcher.launch(opts);
+
+  // The process arrives after the downloading is done, which is exactly when
+  // calling it off has to still work - so it is kept, and killed at once if
+  // the answer came while we were waiting.
+  launcher.launch(opts).then(child => {
+    launch.child = child;
+    if (launch.cancelled && child) child.kill();
+  }).catch(e => console.log('[LAUNCH] could not start:', e.message));
 
   launcher.on('debug', (e) => console.log('[DEBUG]', e));
 
@@ -871,7 +921,8 @@ async function startGame(profile, ramOverride) {
   });
 
   launcher.on('close', (code) => {
-    say('ended');
+    say(launch.cancelled ? 'cancelled' : 'ended');
+    if (activeLaunch === launch) activeLaunch = null;
 
     // Back where it was. A crash is exactly when the launcher is wanted
     // again, so this happens before the report below.
@@ -880,7 +931,9 @@ async function startGame(profile, ramOverride) {
       launcherWindow.focus();
     }
 
-    if (code === 0) return;
+    // A game that was called off did not crash, and reporting it as one would
+    // be blaming the player for their own decision.
+    if (code === 0 || launch.cancelled) return;
 
     // The last words arrive after the process is already gone. Judging the
     // crash the instant it closes meant reading a report with its ending

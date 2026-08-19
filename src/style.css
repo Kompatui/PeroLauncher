@@ -101,6 +101,106 @@ body { font-family: sans-serif; overflow: hidden; }
   object-fit: contain;
 }
 
+/* When a launch fails the whole launcher becomes the message. Everyone knows
+   this screen on sight, and knowing at a glance that something went wrong is
+   the entire job - the small print underneath says what and what to do. */
+.bluescreen {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: #0078d7;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8vh 10vw;
+  box-sizing: border-box;
+  overflow-y: auto;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  -webkit-app-region: no-drag;
+}
+
+.bluescreen.hidden {
+  display: none;
+}
+
+.bluescreen-inner {
+  max-width: 760px;
+  width: 100%;
+}
+
+.bluescreen-face {
+  font-size: 96px;
+  line-height: 1;
+  margin-bottom: 24px;
+  font-weight: 300;
+}
+
+.bluescreen h1 {
+  margin: 0 0 20px;
+  font-size: 30px;
+  font-weight: 400;
+  line-height: 1.3;
+}
+
+.bluescreen p {
+  margin: 0 0 16px;
+  font-size: 17px;
+  line-height: 1.5;
+  opacity: 0.95;
+}
+
+/* Kept quiet: it is here so the reason can be repeated to someone who can
+   help, not to be understood by the person who just wanted to play. */
+.bluescreen-technical {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+  opacity: 0.6;
+  word-break: break-word;
+}
+
+.bluescreen-technical.hidden {
+  display: none;
+}
+
+.bluescreen button {
+  margin-top: 18px;
+  padding: 10px 26px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 3px;
+  background: none;
+  color: #fff;
+  font-size: 15px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.bluescreen button:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+/* Working: the tile stops offering to start the game and offers to stop it
+   instead. Same tile, one meaning at a time. */
+.tile.busy {
+  background: #ff8080;
+}
+
+.tile.busy:hover {
+  background: #ff3d3d;
+}
+
+.tile.busy img {
+  display: none;
+}
+
+.tile-cancel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #7a1414;
+}
+
 /* What the play tile says while it works. The main screen carries no text by
    design, but a launcher that answers a click with nothing for minutes is
    worse than one that breaks its own rule for as long as it is busy. */

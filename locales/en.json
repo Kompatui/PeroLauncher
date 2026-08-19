@@ -240,5 +240,7 @@
   "launch.failed.loader": "The mod loader could not be installed",
   "launch.failed.jarmods": "The game could not be built with the jar mods",
   "launch.mayBeConnection": "Usually this is the connection dropping - try again. If it keeps happening, check the version and loader in the settings.",
-  "launch.notPublished": "That loader build is not on the server, and asking again will not change it. Pick a different loader build in the settings."
+  "launch.notPublished": "That loader build is not on the server, and asking again will not change it. Pick a different loader build in the settings.",
+  "launch.cancelling": "Cancelling…",
+  "bluescreen.continue": "Continue"
 }

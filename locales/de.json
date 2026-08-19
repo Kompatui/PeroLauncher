@@ -242,5 +242,7 @@
   "launch.mayBeConnection": "Meist ist es die Verbindung - versuche es erneut. Wenn es bleibt, prüfe Version und Loader in den Einstellungen.",
   "launch.notPublished": "Diesen Loader-Build gibt es auf dem Server nicht - erneutes Versuchen ändert daran nichts. Wähle in den Einstellungen einen anderen.",
   "launch.cancelling": "Wird abgebrochen…",
-  "bluescreen.continue": "Fortfahren"
+  "bluescreen.continue": "Fortfahren",
+  "launch.running": "Das Spiel läuft",
+  "launch.cancel": "Abbrechen"
 }

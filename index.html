@@ -25,7 +25,19 @@
   <div class="grid">
     <div class="tile yellow" id="tile-folder"><img src="assets/icons/folder.png" alt=""></div>
     <div class="tile red" id="tile-mods"><img src="assets/icons/mods.svg" alt=""></div>
-    <div class="tile green" id="tile-play"><img src="assets/icons/play.png" alt=""></div>
+    <div class="tile green" id="tile-play">
+      <img src="assets/icons/play.png" alt="">
+
+      <!-- Covers the play tile while a launch is under way. Its own element
+           with its own button, so cancelling can never be mistaken for
+           starting: the two are different things and are not the same
+           control wearing a different colour. -->
+      <div class="launch-panel hidden" id="launch-panel">
+        <span class="launch-text" id="launch-text"></span>
+        <span class="launch-bar"><span class="launch-fill" id="launch-fill"></span></span>
+        <button class="launch-cancel" id="btn-cancel"></button>
+      </div>
+    </div>
     <div class="tile grey" id="tile-settings"><img src="assets/icons/settings.png" alt=""></div>
     <div class="tile white" id="tile-skin"><img src="assets/icons/skin.png" alt=""></div>
   </div>

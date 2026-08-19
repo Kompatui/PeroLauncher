@@ -180,77 +180,87 @@ body { font-family: sans-serif; overflow: hidden; }
   background: rgba(255, 255, 255, 0.16);
 }
 
-/* Working: the tile stops offering to start the game and offers to stop it
-   instead. Same tile, one meaning at a time. */
-.tile.busy {
+/* Takes the place of the play tile from the moment a launch starts until the
+   game is over. One control at a time, in the same spot: never a play button
+   and a cancel button on screen together, and never one button meaning
+   different things depending on a variable. */
+.launch-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
   background: #ff8080;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 16px;
+  box-sizing: border-box;
+  cursor: default;
 }
 
-.tile.busy:hover {
-  background: #ff3d3d;
-}
-
-.tile.busy img {
+.launch-panel.hidden {
   display: none;
 }
 
-.tile-cancel {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #7a1414;
-}
-
-/* What the play tile says while it works. The main screen carries no text by
-   design, but a launcher that answers a click with nothing for minutes is
-   worse than one that breaks its own rule for as long as it is busy. */
-.tile-status {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.82);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 13px;
-  color: #2f6b36;
+.launch-text {
+  font-size: 14px;
+  color: #5c1010;
   text-align: center;
-}
-
-.tile-status-text {
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.tile-status-bar {
-  height: 5px;
+.launch-bar {
+  width: min(220px, 80%);
+  height: 6px;
   border-radius: 3px;
-  background: rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.15);
   overflow: hidden;
 }
 
-.tile-status-fill {
+.launch-fill {
   display: block;
   height: 100%;
   width: 0;
-  background: #2f9e44;
+  background: #7a1414;
   transition: width 0.25s ease;
 }
 
 /* Nothing countable to show yet - a bar that crawls says "still working"
    where an empty one would say "stuck". */
-.tile-status.working .tile-status-bar {
-  background: linear-gradient(90deg, rgba(0,0,0,0.10) 25%, rgba(47,158,68,0.55) 50%, rgba(0,0,0,0.10) 75%);
+.launch-fill.working {
+  width: 100%;
+  background: linear-gradient(90deg, rgba(0,0,0,0.06) 25%, rgba(122,20,20,0.65) 50%, rgba(0,0,0,0.06) 75%);
   background-size: 200% 100%;
-  animation: tile-status-sweep 1.4s linear infinite;
+  animation: launch-sweep 1.4s linear infinite;
 }
 
-@keyframes tile-status-sweep {
+@keyframes launch-sweep {
   from { background-position: 200% 0; }
   to   { background-position: 0 0; }
+}
+
+.launch-cancel {
+  padding: 9px 22px;
+  border: none;
+  border-radius: 4px;
+  background: #7a1414;
+  color: #fff;
+  font-size: 15px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.launch-cancel:hover {
+  background: #5c1010;
+}
+
+.launch-cancel.hidden {
+  display: none;
 }
 
 .yellow img { width: 60%; }

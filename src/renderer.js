@@ -3,50 +3,43 @@ document.getElementById('btn-max').addEventListener('click', () => window.api.ma
 document.getElementById('btn-close').addEventListener('click', () => window.api.close());
 
 const playTile = document.getElementById('tile-play');
+const launchPanel = document.getElementById('launch-panel');
+const launchText = document.getElementById('launch-text');
+const launchFill = document.getElementById('launch-fill');
+const cancelButton = document.getElementById('btn-cancel');
 
-// A second click while the first is still working would start a second game.
-// It also used to be the only way to find out the first had failed.
-let launching = false;
+// Starting and stopping are two different things, so they are two different
+// controls. One tile that changed colour and meaning was where every one of
+// these bugs came from: whether a press started a game or stopped one
+// depended on a variable, and when the variable was wrong the launcher did
+// the opposite of what was asked.
+//
+// The panel covers the play tile for as long as a launch is happening, so
+// while it is up the play tile cannot be pressed at all.
+function showPanel(text, fraction, canCancel) {
+  launchText.textContent = text;
+  launchFill.style.width = fraction === null ? '0' : `${Math.round(fraction * 100)}%`;
+  launchFill.classList.toggle('working', fraction === null);
 
-// What the tile says while it works. Without this a click looked exactly like
-// no click at all, for minutes, and the answer was to click again.
-function showStatus(text, fraction) {
-  let status = playTile.querySelector('.tile-status');
-  if (!status) {
-    status = document.createElement('div');
-    status.className = 'tile-status';
-    status.innerHTML = '<span class="tile-status-text"></span>' +
-      '<span class="tile-status-bar"><span class="tile-status-fill"></span></span>';
-    playTile.appendChild(status);
-  }
+  cancelButton.textContent = t('launch.cancel');
+  cancelButton.classList.toggle('hidden', !canCancel);
 
-  status.querySelector('.tile-status-text').textContent = text;
-  const fill = status.querySelector('.tile-status-fill');
-  fill.style.width = fraction === null ? '0' : `${Math.round(fraction * 100)}%`;
-  status.classList.toggle('working', fraction === null);
+  launchPanel.classList.remove('hidden');
 }
 
-function clearStatus() {
-  playTile.querySelector('.tile-status')?.remove();
-  playTile.querySelector('.tile-cancel')?.remove();
-  playTile.classList.remove('busy');
+function hidePanel() {
+  launchPanel.classList.add('hidden');
 }
 
-// While it works the tile becomes the way to call it off. The arrow would be
-// a lie at that point - pressing it again cannot start what is already
-// starting, so it turns into the only thing left worth doing.
-function showCancel() {
-  playTile.classList.add('busy');
-  if (playTile.querySelector('.tile-cancel')) return;
+// Nothing here starts anything. It can only ever call off what is running.
+cancelButton.addEventListener('click', (event) => {
+  event.stopPropagation();
+  showPanel(t('launch.cancelling'), null, false);
+  window.api.cancelLaunch();
+});
 
-  const cross = document.createElement('div');
-  cross.className = 'tile-cancel';
-  cross.innerHTML = `<svg viewBox="0 0 48 48" width="64" height="64" aria-hidden="true">
-      <line x1="10" y1="10" x2="38" y2="38" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
-      <line x1="38" y1="10" x2="10" y2="38" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
-    </svg>`;
-  playTile.appendChild(cross);
-}
+// A press anywhere else on the panel is not a press on the tile underneath.
+launchPanel.addEventListener('click', (event) => event.stopPropagation());
 
 // A failure takes over the whole window instead of arriving as a little grey
 // box from the operating system. It is the launcher's own screen, in the
@@ -73,44 +66,32 @@ document.getElementById('bluescreen-continue').addEventListener('click', () => {
 window.api.onLaunchProgress(progress => {
   if (progress.stage === 'failed' && progress.what) showBluescreen(progress);
 
-  // Reports from a launch that has been called off keep arriving for a while
-  // - the work does not stop the instant the answer is given. Acting on them
-  // redrew the bar on a tile that had gone back to normal, which left it
-  // looking busy while behaving as if it were free: the next press started a
-  // second game instead of stopping the first.
-  if (!launching && !['cancelled', 'ended', 'failed'].includes(progress.stage)) return;
-  if (progress.stage === 'preparing') showStatus(t('launch.preparing'), null);
-  if (progress.stage === 'java') showStatus(t('launch.java'), null);
-  if (progress.stage === 'loader') showStatus(t('launch.loader'), null);
+  // The panel is up from the click until the game is over, so a report can
+  // only ever change what it says - never whether it is there.
+  if (progress.stage === 'preparing') showPanel(t('launch.preparing'), null, true);
+  if (progress.stage === 'java') showPanel(t('launch.java'), null, true);
+  if (progress.stage === 'loader') showPanel(t('launch.loader'), null, true);
 
   if (progress.stage === 'files') {
     const named = progress.type ? `${t('launch.files')} — ${progress.type}` : t('launch.files');
-    showStatus(progress.total ? `${named} ${progress.done}/${progress.total}` : named,
-      progress.total ? progress.done / progress.total : null);
+    showPanel(progress.total ? `${named} ${progress.done}/${progress.total}` : named,
+      progress.total ? progress.done / progress.total : null, true);
   }
 
-  // The game is up, or it is over: the launcher has nothing left to say.
-  if (['running', 'ended', 'failed', 'cancelled'].includes(progress.stage)) {
-    launching = false;
-    clearStatus();
-  }
+  // The game has spoken, but its window takes another half a minute to
+  // appear. The panel stays: freeing the tile here is what let a second press
+  // start a second game while the first was still on its way. Cancelling is
+  // no longer offered, though - the game is running, and closing it from out
+  // here would be taking someone out of a world.
+  if (progress.stage === 'running') showPanel(t('launch.running'), 1, false);
+
+  if (['ended', 'failed', 'cancelled'].includes(progress.stage)) hidePanel();
 });
 
 playTile.addEventListener('click', async () => {
-  // Busy means the tile is a stop button, not a dead one. The screen answers
-  // straight away rather than waiting to be told it may: downloading happens
-  // in the same process that handles this click, so a busy launcher can take
-  // the better part of a minute to reply - and the player has already decided.
-  if (launching) {
-    launching = false;
-    clearStatus();
-    window.api.cancelLaunch();
-    return;
-  }
-
-  launching = true;
-  showCancel();
-  showStatus(t('launch.preparing'), null);
+  // This tile starts games. Nothing else. While one is being started or
+  // played the panel covers it, so this cannot be reached at all.
+  showPanel(t('launch.preparing'), null, true);
 
   try {
     // A saved account first. Signing in on every click was never necessary -
@@ -130,17 +111,13 @@ playTile.addEventListener('click', async () => {
 
     const result = await window.api.launchGame(profile);
 
-    // The reason is shown by the launcher itself; here the tile just stops
-    // pretending to work.
-    if (!result.started) {
-      launching = false;
-      clearStatus();
-    }
+    // The reason is shown on the blue screen; here the panel simply comes
+    // down and the play tile is itself again.
+    if (!result.started) hidePanel();
   } catch (e) {
     // Closing the Microsoft window lands here, and so does a refusal from it.
     console.log('Launch did not start:', e.message);
-    launching = false;
-    clearStatus();
+    hidePanel();
   }
 });
 

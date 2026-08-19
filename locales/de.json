@@ -167,7 +167,7 @@
   "packs.categories": "Kategorien",
   "packs.clearCategories": "Zurücksetzen",
   "category.datapack": "Datenpaket",
-  "category.kitchen-sink": "Rundum",
+  "category.kitchen-sink": "Von allem etwas",
   "category.multiplayer": "Mehrspieler",
   "category.quests": "Aufgaben",
   "category.lightweight": "Leichtgewicht",
@@ -222,5 +222,13 @@
   "category.reflections": "Spiegelungen",
   "category.screenshot": "Für Screenshots",
   "category.semi-realistic": "Halbrealistisch",
-  "category.shadows": "Schatten"
+  "category.shadows": "Schatten",
+  "packs.findReady": "Fertiges Pack finden",
+  "packs.importFile": "Datei laden",
+  "packs.readyExplain": "Fertige Packs von Modrinth - Version, Loader und Mods sind bereits gewählt",
+  "packs.searchPacksPlaceholder": "Fertige Packs suchen",
+  "packs.installPack": "Installieren",
+  "packs.installingPack": "Pack wird installiert",
+  "packs.downloadingPack": "Pack wird geladen…",
+  "packs.unpacking": "Dateien werden abgelegt…"
 }

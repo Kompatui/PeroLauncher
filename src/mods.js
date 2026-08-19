@@ -89,10 +89,19 @@ async function showPacks() {
 
     <div class="pack-actions">
       <button class="modal-btn" id="create-pack">${t('packs.create')}</button>
+      <button class="modal-btn" id="find-pack">${t('packs.findReady')}</button>
+      <button class="modal-btn" id="import-pack">${t('packs.importFile')}</button>
     </div>
   `;
 
   document.getElementById('create-pack').addEventListener('click', createPack);
+  document.getElementById('find-pack').addEventListener('click', browseModpacks);
+
+  document.getElementById('import-pack').addEventListener('click', async () => {
+    const file = await window.api.pickModpackFile();
+    if (!file) return;
+    installPack(() => window.api.installLocalModpack(file), file.split(/[\\/]/).pop());
+  });
 
   page.querySelectorAll('.pack-row').forEach(row => {
     row.addEventListener('click', async () => {
@@ -433,6 +442,160 @@ async function browseMods(pack, kind = 'mod') {
     shown = offset + data.mods.length;
     wire(cards);
 
+    if (shown < data.total) {
+      more.innerHTML = `<button class="modal-btn" id="load-more">${t('packs.showMore')}</button>`;
+      document.getElementById('load-more').addEventListener('click', () => load(shown));
+    }
+  }
+
+  let typingTimer = null;
+  field.addEventListener('input', () => {
+    clearTimeout(typingTimer);
+    typingTimer = setTimeout(() => { query = field.value.trim(); load(0); }, 350);
+  });
+
+  field.focus();
+  load(0);
+}
+
+// ------------------------------------------------- ready-made packs
+
+// Installing a pack means fetching dozens of files, so the screen says what
+// it is doing rather than sitting still for several minutes.
+async function installPack(run, label) {
+  modalBox.innerHTML = `
+    <h3>${t('packs.installingPack')}</h3>
+    <p class="modal-note">${escapeHtml(label || '')}</p>
+    <div class="install-bar"><div class="install-bar-fill" id="install-fill"></div></div>
+    <p class="modal-note" id="install-step">${t('packs.downloadingPack')}</p>
+  `;
+  overlay.classList.remove('hidden');
+
+  const fill = document.getElementById('install-fill');
+  const step = document.getElementById('install-step');
+
+  window.api.onModpackProgress(progress => {
+    if (!fill.isConnected) return;
+
+    if (progress.stage === 'files' && progress.total) {
+      fill.style.width = `${Math.round((progress.done / progress.total) * 100)}%`;
+      step.textContent = `${progress.done} / ${progress.total} — ${progress.name || ''}`;
+    }
+    if (progress.stage === 'overrides') {
+      fill.style.width = '100%';
+      step.textContent = t('packs.unpacking');
+    }
+  });
+
+  const result = await run();
+  closeModal();
+
+  if (!result.ok) {
+    modalBox.innerHTML = `
+      <h3>${t('packs.installFailed')}</h3>
+      <p class="modal-note warn">${escapeHtml(result.error || '')}</p>
+      ${closeButtonHtml()}
+    `;
+    overlay.classList.remove('hidden');
+    wireCloseButton();
+    return;
+  }
+
+  openPack(result.pack.id);
+}
+
+async function browseModpacks() {
+  if (!Object.keys(CATEGORIES).length) CATEGORIES = await window.api.getModCategories();
+
+  page.innerHTML = `
+    <div class="browse-head">
+      <button class="link-btn" id="to-packs">${t('packs.backToList')}</button>
+      <div class="browse-title">
+        <h2>${t('packs.findReady')}</h2>
+        <span class="browse-for">${t('packs.readyExplain')}</span>
+      </div>
+      <input type="text" id="mod-search" class="browse-search" placeholder="${t('packs.searchPacksPlaceholder')}">
+    </div>
+
+    <div class="browse-body">
+      <aside class="browse-filters">
+        <div class="filters-head">
+          <span class="filters-title">${t('packs.categories')}</span>
+          <button class="link-btn hidden" id="clear-categories">${t('packs.clearCategories')}</button>
+        </div>
+        <div class="category-list">
+          ${(CATEGORIES.modpack || []).map(slug => `
+            <label class="category-row">
+              <input type="checkbox" value="${escapeHtml(slug)}">
+              <span>${escapeHtml(categoryName(slug))}</span>
+            </label>
+          `).join('')}
+        </div>
+      </aside>
+
+      <div class="browse-results">
+        <div class="mod-cards" id="mod-cards"><p class="modal-note">${t('packs.searching')}</p></div>
+        <div class="browse-more" id="browse-more"></div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('to-packs').addEventListener('click', showPacks);
+
+  const field = document.getElementById('mod-search');
+  const cards = document.getElementById('mod-cards');
+  const more = document.getElementById('browse-more');
+  const clear = document.getElementById('clear-categories');
+
+  let round = 0;
+  let query = '';
+  let chosen = [];
+
+  function readCategories() {
+    chosen = [...page.querySelectorAll('.category-row input:checked')].map(box => box.value);
+    clear.classList.toggle('hidden', chosen.length === 0);
+    load(0);
+  }
+
+  page.querySelectorAll('.category-row input').forEach(box => box.addEventListener('change', readCategories));
+  clear.addEventListener('click', () => {
+    page.querySelectorAll('.category-row input').forEach(box => { box.checked = false; });
+    readCategories();
+  });
+
+  async function load(offset) {
+    const mine = ++round;
+    if (!offset) cards.innerHTML = `<p class="modal-note">${t('packs.searching')}</p>`;
+    more.innerHTML = '';
+
+    const data = await window.api.searchModpacks(query, offset, chosen);
+    if (mine !== round) return;
+
+    if (data.error) {
+      cards.innerHTML = `<p class="modal-note warn">${t('packs.searchFailed')}</p>`;
+      return;
+    }
+    if (!data.mods.length && !offset) {
+      cards.innerHTML = `<p class="modal-note">${t('packs.nothingFound')}</p>`;
+      return;
+    }
+
+    const html = data.mods.map(pack => modCard(pack, false)).join('');
+    if (offset) cards.insertAdjacentHTML('beforeend', html);
+    else cards.innerHTML = html;
+
+    cards.querySelectorAll('.mod-card').forEach(card => {
+      const button = card.querySelector('.mod-install');
+      if (button.dataset.wired) return;
+      button.dataset.wired = '1';
+      button.textContent = t('packs.installPack');
+      button.addEventListener('click', () => installPack(
+        () => window.api.installModpack(card.dataset.id),
+        card.querySelector('.mod-card-title')?.textContent.trim()
+      ));
+    });
+
+    const shown = offset + data.mods.length;
     if (shown < data.total) {
       more.innerHTML = `<button class="modal-btn" id="load-more">${t('packs.showMore')}</button>`;
       document.getElementById('load-more').addEventListener('click', () => load(shown));

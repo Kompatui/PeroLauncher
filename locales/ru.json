@@ -167,7 +167,7 @@
   "packs.categories": "Категории",
   "packs.clearCategories": "Сбросить",
   "category.datapack": "Датапак",
-  "category.kitchen-sink": "Всё сразу",
+  "category.kitchen-sink": "Всего понемногу",
   "category.multiplayer": "Мультиплеер",
   "category.quests": "Задания",
   "category.lightweight": "Лёгкий",
@@ -222,5 +222,13 @@
   "category.reflections": "Отражения",
   "category.screenshot": "Для скриншотов",
   "category.semi-realistic": "Полуреалистичный",
-  "category.shadows": "Тени"
+  "category.shadows": "Тени",
+  "packs.findReady": "Найти готовую",
+  "packs.importFile": "Загрузить файл",
+  "packs.readyExplain": "Готовые сборки с Modrinth — версия, загрузчик и моды уже подобраны",
+  "packs.searchPacksPlaceholder": "Поиск готовых сборок",
+  "packs.installPack": "Установить",
+  "packs.installingPack": "Устанавливаю сборку",
+  "packs.downloadingPack": "Скачиваю сборку…",
+  "packs.unpacking": "Раскладываю файлы…"
 }

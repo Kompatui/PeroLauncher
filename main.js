@@ -577,6 +577,42 @@ ipcMain.handle('remove-instance-mod', (event, id, filename, kind) => {
 
 ipcMain.handle('get-mod-categories', () => modrinthCategories());
 
+ipcMain.handle('search-modpacks', async (event, query, offset, categories) => {
+  try {
+    return await searchModpacks(query, offset || 0, categories || []);
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+// Installing a whole pack takes minutes, so the page is told how it is going.
+ipcMain.handle('install-modpack', async (event, projectId) => {
+  try {
+    const report = progress => event.sender.send('modpack-progress', progress);
+    return { ok: true, pack: await installModpack(projectId, report) };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('pick-modpack-file', async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ['openFile'],
+    filters: [{ name: 'Modpack', extensions: ['mrpack', 'zip'] }]
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths[0];
+});
+
+ipcMain.handle('install-local-modpack', async (event, filePath) => {
+  try {
+    const report = progress => event.sender.send('modpack-progress', progress);
+    return { ok: true, pack: await installLocalModpack(filePath, report) };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 ipcMain.handle('get-shader-support', (event, id) => {
   const instance = loadInstances().instances.find(entry => entry.id === id);
   if (!instance) return { ready: false };
@@ -1068,6 +1104,173 @@ async function installMod(instance, source, projectId, kind = 'mod', seen = new 
     installed.push(...await installMod(instance, source, dependency, kind, seen));
   }
   return installed;
+}
+
+// A ready-made pack says which loader it wants in these terms.
+const LOADER_FROM_DEPENDENCY = {
+  'fabric-loader': 'fabric',
+  'quilt-loader': 'quilt',
+  'forge': 'forge',
+  'neoforge': 'neoforge'
+};
+
+// Where a file from someone else's archive is allowed to land. The paths
+// inside come from a stranger, and a path that climbs out of the folder would
+// let a pack write anywhere on the machine.
+function safeInside(folder, relative) {
+  const full = path.resolve(folder, relative);
+  const root = path.resolve(folder);
+  return full === root || full.startsWith(root + path.sep) ? full : null;
+}
+
+// Searching for whole packs rather than for pieces to put in one. Nothing is
+// filtered by version or loader here: a ready-made pack brings its own.
+async function searchModpacks(query, offset = 0, categories = []) {
+  const facets = [['project_type:modpack']];
+  for (const category of categories) facets.push([`categories:${category}`]);
+
+  const url = `${MODRINTH}/search?limit=20&offset=${offset}` +
+    `&query=${encodeURIComponent(query || '')}` +
+    `&facets=${encodeURIComponent(JSON.stringify(facets))}` +
+    `&index=${query ? 'relevance' : 'downloads'}`;
+
+  const data = await fetchJson(url, { headers: MOD_API_HEADERS });
+  return {
+    total: data.total_hits,
+    mods: (data.hits || []).map(hit => ({
+      source: 'modrinth',
+      id: hit.project_id,
+      title: hit.title,
+      description: hit.description,
+      author: hit.author,
+      downloads: hit.downloads,
+      categories: (hit.display_categories || hit.categories || []).slice(0, 4),
+      icon: hit.icon_url || null,
+      versions: hit.versions?.slice(-1)[0] || null
+    }))
+  };
+}
+
+// Installs a whole pack as a new one of ours: its version, its loader, its
+// mods and whatever else it ships. Long enough that it reports as it goes -
+// several minutes of silence would look like a hang.
+async function installModpack(projectId, report = () => {}) {
+  const builds = await fetchJson(
+    `${MODRINTH}/project/${encodeURIComponent(projectId)}/version`, { headers: MOD_API_HEADERS });
+  if (!Array.isArray(builds) || !builds.length) throw new Error('this pack has no published build');
+
+  const build = builds[0];
+  const archive = build.files.find(file => file.primary) || build.files[0];
+  if (!archive) throw new Error('this build has no file');
+
+  report({ stage: 'downloading', done: 0, total: 0 });
+  const data = await fetchBuffer(archive.url, { headers: MOD_API_HEADERS });
+
+  return installPackArchive(data, {
+    source: 'modrinth',
+    projectId,
+    versionId: build.id,
+    versionNumber: build.version_number
+  }, report);
+}
+
+// The same pack, handed over as a file instead of fetched. A .mrpack from a
+// friend, a forum or the author's own hard disk is the same archive Modrinth
+// serves, so it is unpacked by the same code.
+async function installLocalModpack(filePath, report = () => {}) {
+  if (!fs.existsSync(filePath)) throw new Error('there is no such file');
+  return installPackArchive(fs.readFileSync(filePath), { source: 'file', from: filePath }, report);
+}
+
+// Everything a pack archive holds, laid out as a pack of ours.
+async function installPackArchive(data, origin, report = () => {}) {
+  const zip = new AdmZip(data);
+  const indexEntry = zip.getEntry('modrinth.index.json');
+  if (!indexEntry) throw new Error('this file is not a Modrinth pack');
+
+  const index = JSON.parse(indexEntry.getData().toString('utf-8'));
+
+  const mcVersion = index.dependencies?.minecraft;
+  if (!mcVersion) throw new Error('the pack does not say which Minecraft it is for');
+
+  let loader = 'vanilla';
+  let loaderVersion = null;
+  for (const [dependency, version] of Object.entries(index.dependencies || {})) {
+    if (LOADER_FROM_DEPENDENCY[dependency]) {
+      loader = LOADER_FROM_DEPENDENCY[dependency];
+      loaderVersion = version;
+    }
+  }
+
+  const store = loadInstances();
+  const instance = {
+    id: instanceId(index.name || 'pack', store.instances.map(entry => entry.id)),
+    name: index.name || 'Modpack',
+    version: mcVersion,
+    loader,
+    loaderVersion,
+    ram: null,
+    fromModpack: origin,
+    createdAt: new Date().toISOString()
+  };
+
+  const folder = instanceFolder(instance);
+  fs.mkdirSync(folder, { recursive: true });
+
+  // Only what a player needs. A pack carries server-side files too, and
+  // fetching them would be minutes spent on things this machine never runs.
+  const wanted = (index.files || []).filter(file => file.env?.client !== 'unsupported');
+
+  let done = 0;
+  for (const file of wanted) {
+    const destination = safeInside(folder, file.path);
+    if (!destination) {
+      console.log('[MODPACK] refused a path outside the pack folder:', file.path);
+      continue;
+    }
+
+    report({ stage: 'files', done, total: wanted.length, name: path.basename(file.path) });
+
+    let saved = false;
+    for (const url of file.downloads || []) {
+      try {
+        const contents = await fetchBuffer(url, { headers: MOD_API_HEADERS });
+        if (file.hashes?.sha1) {
+          const got = crypto.createHash('sha1').update(contents).digest('hex');
+          if (got !== file.hashes.sha1) continue;   // Try the next address.
+        }
+        fs.mkdirSync(path.dirname(destination), { recursive: true });
+        fs.writeFileSync(destination, contents);
+        saved = true;
+        break;
+      } catch {
+        // The pack may list several places to get it from.
+      }
+    }
+
+    if (!saved) console.log('[MODPACK] could not obtain', file.path);
+    done++;
+  }
+
+  // Configs, keybinds and the rest the pack ships as plain files.
+  report({ stage: 'overrides', done: wanted.length, total: wanted.length });
+  for (const entry of zip.getEntries()) {
+    const match = entry.entryName.match(/^(?:client-)?overrides\/(.+)$/);
+    if (!match || entry.isDirectory) continue;
+
+    const destination = safeInside(folder, match[1]);
+    if (!destination) continue;
+
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.writeFileSync(destination, entry.getData());
+  }
+
+  store.instances.push(instance);
+  store.activeId = instance.id;
+  saveInstances(store);
+
+  report({ stage: 'done', done: wanted.length, total: wanted.length });
+  return { id: instance.id, name: instance.name, version: mcVersion, loader, files: wanted.length };
 }
 
 // Minecraft writes its own account of a crash here, and it says far more than

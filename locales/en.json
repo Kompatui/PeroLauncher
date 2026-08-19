@@ -167,7 +167,7 @@
   "packs.categories": "Categories",
   "packs.clearCategories": "Clear",
   "category.datapack": "Data pack",
-  "category.kitchen-sink": "Kitchen sink",
+  "category.kitchen-sink": "A bit of everything",
   "category.multiplayer": "Multiplayer",
   "category.quests": "Quests",
   "category.lightweight": "Lightweight",
@@ -222,5 +222,13 @@
   "category.reflections": "Reflections",
   "category.screenshot": "For screenshots",
   "category.semi-realistic": "Semi-realistic",
-  "category.shadows": "Shadows"
+  "category.shadows": "Shadows",
+  "packs.findReady": "Find a ready-made one",
+  "packs.importFile": "Load a file",
+  "packs.readyExplain": "Ready-made packs from Modrinth - version, loader and mods already chosen",
+  "packs.searchPacksPlaceholder": "Search ready-made packs",
+  "packs.installPack": "Install",
+  "packs.installingPack": "Installing the pack",
+  "packs.downloadingPack": "Downloading the pack…",
+  "packs.unpacking": "Laying out the files…"
 }

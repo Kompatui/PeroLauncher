@@ -229,6 +229,23 @@
   color: #888;
 }
 
+/* Installing a whole pack is dozens of files and several minutes, so it says
+   how far it has got. */
+.install-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: #eee;
+  overflow: hidden;
+  width: min(420px, 100%);
+}
+
+.install-bar-fill {
+  height: 100%;
+  width: 0;
+  background: #00af5c;
+  transition: width 0.2s ease;
+}
+
 /* Mods and texture packs are different things, not different filters on one
    thing, so they get a switch of their own rather than a category. */
 .kind-tabs {

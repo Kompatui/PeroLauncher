@@ -347,10 +347,10 @@ async function pickLoaderForPack(name, version) {
     <p class="modal-note">${t('loader.checking')}</p>
   `;
 
-  const available = await window.api.getAvailableLoaders(version);
+  // Each entry is { id, versions } - the builds come back with the answer, so
+  // choosing one needs no second trip to the network.
+  const offered = await window.api.getAvailableLoaders(version);
   if (overlay.classList.contains('hidden')) return;
-
-  const offered = available.filter(entry => entry.available);
 
   modalBox.innerHTML = `
     <h3>${t('loader.select')}</h3>
@@ -371,18 +371,24 @@ async function pickLoaderForPack(name, version) {
     option.addEventListener('click', () => {
       const loader = option.dataset.loader;
       if (loader === 'vanilla') return finishPack({ name, version, loader: 'vanilla', loaderVersion: null });
-      pickLoaderBuildForPack(name, version, loader);
+
+      const entry = offered.find(item => item.id === loader);
+      pickLoaderBuildForPack(name, version, loader, entry?.versions || []);
     });
   });
 }
 
-async function pickLoaderBuildForPack(name, version, loader) {
+async function pickLoaderBuildForPack(name, version, loader, known) {
   modalBox.innerHTML = `
     <h3>${LOADER_NAMES[loader] || loader}</h3>
     <p class="modal-note">${t('loader.loading')}</p>
   `;
 
-  const builds = await window.api.getLoaderVersions(loader, version);
+  let builds = known;
+  if (!builds || !builds.length) {
+    const answer = await window.api.getLoaderVersions(loader, version);
+    builds = answer.versions || [];
+  }
   if (overlay.classList.contains('hidden')) return;
 
   if (!builds.length) {
@@ -396,9 +402,15 @@ async function pickLoaderBuildForPack(name, version, loader) {
   }
 
   modalBox.innerHTML = `
-    <h3>${LOADER_NAMES[loader] || loader}</h3>
+    <h3>${LOADER_NAMES[loader] || loader} — ${t('loader.pickVersion')}</h3>
+    <p class="modal-note">${escapeHtml(version)}</p>
     <div class="version-list">
-      ${builds.map(build => `<div class="version-row" data-build="${escapeHtml(build)}"><span class="version-id">${escapeHtml(build)}</span></div>`).join('')}
+      ${builds.map(build => `
+        <div class="version-row" data-build="${escapeHtml(build.version)}">
+          <span class="version-id">${escapeHtml(build.version)}</span>
+          ${build.stable ? `<span class="version-meta"><span class="version-installed">${t('loader.stable')}</span></span>` : ''}
+        </div>
+      `).join('')}
     </div>
     <div class="modal-buttons"><button class="modal-btn-cancel" id="modal-cancel">${t('modal.close')}</button></div>
   `;

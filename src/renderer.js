@@ -72,6 +72,13 @@ document.getElementById('bluescreen-continue').addEventListener('click', () => {
 
 window.api.onLaunchProgress(progress => {
   if (progress.stage === 'failed' && progress.what) showBluescreen(progress);
+
+  // Reports from a launch that has been called off keep arriving for a while
+  // - the work does not stop the instant the answer is given. Acting on them
+  // redrew the bar on a tile that had gone back to normal, which left it
+  // looking busy while behaving as if it were free: the next press started a
+  // second game instead of stopping the first.
+  if (!launching && !['cancelled', 'ended', 'failed'].includes(progress.stage)) return;
   if (progress.stage === 'preparing') showStatus(t('launch.preparing'), null);
   if (progress.stage === 'java') showStatus(t('launch.java'), null);
   if (progress.stage === 'loader') showStatus(t('launch.loader'), null);

@@ -645,6 +645,25 @@ ipcMain.handle('install-mod', async (event, id, source, projectId, kind) => {
 
 ipcMain.handle('launch-game', (event, profile) => startGame(profile));
 
+// Java does not always go quietly, and it leaves children of its own. Asking
+// Windows to take the whole tree down is the only way to be sure the game a
+// player called off is actually gone.
+function stopGameProcess(child) {
+  if (!child || child.killed) return;
+
+  try {
+    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
+  } catch (e) {
+    console.log('[LAUNCH] taskkill refused:', e.message);
+  }
+
+  try {
+    child.kill();
+  } catch (e) {
+    console.log('[LAUNCH] could not stop the game process:', e.message);
+  }
+}
+
 // Answering at once matters more than stopping at once. A download already in
 // flight cannot be interrupted mid-file - and should not be, since the file it
 // finishes is one less to fetch next time - but the player asked to stop, and
@@ -654,14 +673,9 @@ ipcMain.handle('cancel-launch', (event) => {
 
   activeLaunch.cancelled = true;
   event.sender.send('launch-progress', { stage: 'cancelled' });
+  console.log('[LAUNCH] called off' + (activeLaunch.child ? ` - stopping process ${activeLaunch.child.pid}` : ' before the game started'));
 
-  if (activeLaunch.child) {
-    try {
-      activeLaunch.child.kill();
-    } catch (e) {
-      console.log('[LAUNCH] could not stop the game process:', e.message);
-    }
-  }
+  stopGameProcess(activeLaunch.child);
   return true;
 });
 
@@ -880,7 +894,7 @@ async function startGame(profile, ramOverride) {
   // the answer came while we were waiting.
   launcher.launch(opts).then(child => {
     launch.child = child;
-    if (launch.cancelled && child) child.kill();
+    if (launch.cancelled) stopGameProcess(child);
   }).catch(e => console.log('[LAUNCH] could not start:', e.message));
 
   launcher.on('debug', (e) => console.log('[DEBUG]', e));
@@ -888,7 +902,18 @@ async function startGame(profile, ramOverride) {
   // What the launcher is fetching and how far along it is. This is the part
   // that takes the minutes: the game jar, its libraries, and several thousand
   // small asset files.
-  launcher.on('progress', (e) => say('files', { type: e.type, done: e.task, total: e.total }));
+  //
+  // One message per file means nearly four thousand of them, and the page
+  // spent so long redrawing that it took twenty seconds to notice a click.
+  // A few a second is all anyone can read anyway.
+  let lastSaid = 0;
+  launcher.on('progress', (e) => {
+    const finished = e.task >= e.total;
+    if (!finished && Date.now() - lastSaid < 150) return;
+
+    lastSaid = Date.now();
+    say('files', { type: e.type, done: e.task, total: e.total });
+  });
 
   // The game's own output is the only place its reason for dying shows up,
   // so keep the tail of it around for the report below.
@@ -908,9 +933,15 @@ async function startGame(profile, ramOverride) {
   // at an empty desktop with no sign that anything is happening.
   let steppedAside = false;
 
-  // The first word out of the game means it is running: the downloading is
-  // over and the window is on its way.
+  // The last guard, and the one that matters: the answer to stop can arrive
+  // while the game is already being spawned, and a game that starts after
+  // being called off is the launcher overruling the player.
   launcher.on('data', () => {
+    if (launch.cancelled) {
+      stopGameProcess(launch.child);
+      return;
+    }
+
     if (steppedAside || !launcherWindow || launcherWindow.isDestroyed()) return;
     steppedAside = true;
 

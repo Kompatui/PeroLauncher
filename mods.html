@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title data-i18n="packs.pageTitle">Pero Launcher</title>
+  <link rel="stylesheet" href="src/style.css">
+  <link rel="stylesheet" href="src/settings.css">
+  <link rel="stylesheet" href="src/mods.css">
+</head>
+<body>
+  <div class="titlebar">
+    <div class="titlebar-left">
+      <button id="btn-back" class="back-btn">←</button>
+      <img src="assets/icons/logo.png" class="app-icon" alt="">
+      <span class="app-title">Pero V1.0.0</span>
+    </div>
+    <div class="titlebar-buttons">
+      <button id="btn-min" class="win-btn">
+          <svg width="10" height="10"><line x1="0" y1="5" x2="10" y2="5" stroke="black" stroke-width="1"/></svg>
+      </button>
+      <button id="btn-max" class="win-btn"></button>
+      <button id="btn-close" class="win-btn close-btn">
+          <svg width="10" height="10"><line x1="0" y1="0" x2="10" y2="10" stroke="black" stroke-width="1"/><line x1="10" y1="0" x2="0" y2="10" stroke="black" stroke-width="1"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="packs-page" id="page"></div>
+
+  <div class="modal-overlay hidden" id="modal-overlay">
+    <div class="modal-box" id="modal-box"></div>
+  </div>
+
+  <script src="src/i18n.js"></script>
+  <script src="src/mods.js"></script>
+</body>
+</html>

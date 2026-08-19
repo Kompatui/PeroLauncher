@@ -10,6 +10,9 @@ java/
 settings.json
 # Holds the refresh tokens of every signed-in account.
 accounts.json
+# The player's own modpacks - their mods, configs and worlds.
+instances.json
+instances/
 versions-cache.json
 java-versions.json
 

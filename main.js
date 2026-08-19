@@ -77,6 +77,57 @@ function saveSettingsToDisk(settings) {
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 }
 
+// Modpacks. A player who only wants to play never has to make one - the
+// settings page is enough on its own. Making one binds a version and a loader
+// to it there and then, and from that moment those answer for it: mods go
+// into the pack rather than into the shared game folder, and picking it
+// overrides what the settings page says.
+const instancesPath = 'E:\\PeroLauncher\\instances.json';
+const instancesDir = 'E:\\PeroLauncher\\instances';
+
+function loadInstances() {
+  if (!fs.existsSync(instancesPath)) return { activeId: null, instances: [] };
+  try {
+    const parsed = JSON.parse(fs.readFileSync(instancesPath, 'utf-8'));
+    return {
+      activeId: parsed.activeId || null,
+      instances: Array.isArray(parsed.instances) ? parsed.instances : []
+    };
+  } catch {
+    return { activeId: null, instances: [] };
+  }
+}
+
+function saveInstances(store) {
+  fs.mkdirSync(path.dirname(instancesPath), { recursive: true });
+  fs.writeFileSync(instancesPath, JSON.stringify(store, null, 2));
+}
+
+function instanceFolder(instance) {
+  return path.join(instancesDir, instance.id);
+}
+
+// The one in use, or null when the player is on the plain path.
+function activeInstance() {
+  const store = loadInstances();
+  return store.instances.find(entry => entry.id === store.activeId) || null;
+}
+
+// A folder name made from what the player typed. Kept readable rather than
+// reduced to a number, because they will see it in the explorer sooner or
+// later and "My pack" is worth more than "instance-3".
+function instanceId(name, taken) {
+  const base = name.trim().toLowerCase()
+    .replace(/[^a-z0-9\u0430-\u044f\u0451]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40) || 'pack';
+
+  let id = base;
+  let n = 2;
+  while (taken.includes(id)) id = `${base}-${n++}`;
+  return id;
+}
+
 // Signed-in accounts live in their own file rather than in settings.json.
 // What is kept is a refresh token - not a password, and not a key to the game
 // on its own, but still the thing that gets someone into the account. The
@@ -430,6 +481,120 @@ ipcMain.handle('get-session', async () => {
   }
 });
 
+ipcMain.handle('get-instances', () => {
+  const store = loadInstances();
+  return {
+    activeId: store.activeId,
+    instances: store.instances.map(instance => ({
+      ...instance,
+      folder: instanceFolder(instance),
+      modCount: listInstanceMods(instance).length
+    }))
+  };
+});
+
+ipcMain.handle('create-instance', (event, draft) => {
+  const store = loadInstances();
+  const name = String(draft.name || '').trim();
+  if (!name) return { ok: false, reason: 'no-name' };
+
+  const instance = {
+    id: instanceId(name, store.instances.map(entry => entry.id)),
+    name,
+    version: draft.version,
+    loader: draft.loader || 'vanilla',
+    loaderVersion: draft.loaderVersion || null,
+    ram: null,
+    createdAt: new Date().toISOString()
+  };
+
+  fs.mkdirSync(path.join(instancesDir, instance.id, 'mods'), { recursive: true });
+  store.instances.push(instance);
+  store.activeId = instance.id;
+  saveInstances(store);
+
+  return { ok: true, id: instance.id };
+});
+
+ipcMain.handle('select-instance', (event, id) => {
+  const store = loadInstances();
+  // null puts the player back on the plain path, with the settings page in
+  // charge again. It is a choice, not an absence of one.
+  store.activeId = id && store.instances.some(entry => entry.id === id) ? id : null;
+  saveInstances(store);
+  return store.activeId;
+});
+
+ipcMain.handle('delete-instance', async (event, id) => {
+  const store = loadInstances();
+  const instance = store.instances.find(entry => entry.id === id);
+  if (!instance) return { ok: false };
+
+  const t = loadTranslations(currentLocale);
+  const answer = dialog.showMessageBoxSync({
+    type: 'warning',
+    title: t['packs.deleteTitle'],
+    message: `${t['packs.deleteTitle']}: ${instance.name}`,
+    detail: t['packs.deleteWarning'],
+    buttons: [t['packs.deleteConfirm'], t['modal.close']],
+    defaultId: 1,
+    cancelId: 1
+  });
+  if (answer !== 0) return { ok: false };
+
+  // Worlds live in here too, so it goes to the recycle bin rather than being
+  // erased - a wrong click should be survivable.
+  await shell.trashItem(instanceFolder(instance)).catch(() => {
+    fs.rmSync(instanceFolder(instance), { recursive: true, force: true });
+  });
+
+  store.instances = store.instances.filter(entry => entry.id !== id);
+  if (store.activeId === id) store.activeId = null;
+  saveInstances(store);
+  return { ok: true };
+});
+
+ipcMain.handle('open-instance-folder', (event, id) => {
+  const instance = loadInstances().instances.find(entry => entry.id === id);
+  if (instance) shell.openPath(instanceFolder(instance));
+});
+
+ipcMain.handle('list-instance-mods', (event, id) => {
+  const instance = loadInstances().instances.find(entry => entry.id === id);
+  return instance ? listInstanceMods(instance) : [];
+});
+
+ipcMain.handle('remove-instance-mod', (event, id, filename) => {
+  const instance = loadInstances().instances.find(entry => entry.id === id);
+  if (!instance || filename !== path.basename(filename)) return { ok: false };
+
+  const file = path.join(instanceFolder(instance), 'mods', filename);
+  if (fs.existsSync(file)) fs.rmSync(file);
+  return { ok: true };
+});
+
+ipcMain.handle('search-mods', async (event, id, query, offset) => {
+  const instance = loadInstances().instances.find(entry => entry.id === id);
+  if (!instance) return { error: 'no-instance' };
+
+  try {
+    return await modProviders.modrinth.search(query, instance, offset || 0);
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+ipcMain.handle('install-mod', async (event, id, source, projectId) => {
+  const instance = loadInstances().instances.find(entry => entry.id === id);
+  if (!instance) return { ok: false, error: 'no-instance' };
+
+  try {
+    return { ok: true, installed: await installMod(instance, source, projectId) };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 ipcMain.handle('launch-game', (event, profile) => startGame(profile));
 
 // ramOverride is set when the launcher is having a second go with a smaller
@@ -438,7 +603,19 @@ async function startGame(profile, ramOverride) {
   const settings = loadSettings();
   const launcher = new Client();
 
-  const effectiveRam = ramOverride || (settings.ramAuto ? autoRamMB() : settings.ram);
+  // A chosen pack answers for its own version, loader and folder. Nothing
+  // else changes: the same code launches both paths, so a pack cannot end up
+  // on a route the plain one has not already proved.
+  const pack = activeInstance();
+  if (pack) {
+    settings.version = pack.version;
+    settings.loader = pack.loader;
+    settings.loaderVersion = pack.loaderVersion;
+    settings.gameFolder = instanceFolder(pack);
+    if (pack.ram) settings.ram = pack.ram;
+  }
+
+  const effectiveRam = ramOverride || (settings.ramAuto && !pack?.ram ? autoRamMB() : settings.ram);
 
   const opts = {
     authorization: profile.mclc,
@@ -550,12 +727,15 @@ async function startGame(profile, ramOverride) {
     }
   }
 
-  // Mod settings are written into one shared folder by every version, and
-  // they are not written the same way. Each version gets its own set.
-  try {
-    useConfigOf(settings.gameFolder, `${settings.version}-${settings.loader || 'vanilla'}`);
-  } catch (e) {
-    console.log('Could not swap the config folder:', e.message);
+  // Only the shared folder needs this. A pack has a folder to itself, so
+  // nothing is there to clash with it, and shuffling its config about would
+  // be meddling for no reason.
+  if (!pack) {
+    try {
+      useConfigOf(settings.gameFolder, `${settings.version}-${settings.loader || 'vanilla'}`);
+    } catch (e) {
+      console.log('Could not swap the config folder:', e.message);
+    }
   }
 
   // Whatever the player typed goes on last, so it wins over what the launcher
@@ -617,6 +797,177 @@ async function startGame(profile, ramOverride) {
   });
 
   return { started: true, error: null };
+}
+
+// Where mods come from. One shape for every source, so adding CurseForge
+// later means adding an entry here rather than touching the pages.
+//
+// CurseForge is deliberately absent for now: its API needs a developer key we
+// do not have, and offering a source that cannot answer would be a button
+// leading nowhere.
+const MODRINTH = 'https://api.modrinth.com/v2';
+
+// Modrinth asks to be told who is calling, and it is only polite to answer.
+const MOD_API_HEADERS = {
+  'User-Agent': 'Kompatui/PeroLauncher/1.0 (https://github.com/Kompatui/PeroLauncher)'
+};
+
+// Quilt runs Fabric's mods, so a Quilt pack should be offered them too -
+// refusing would hide almost everything that exists for it.
+function loaderTags(loader) {
+  if (loader === 'quilt') return ['quilt', 'fabric'];
+  return [loader];
+}
+
+const modProviders = {
+  modrinth: {
+    id: 'modrinth',
+    name: 'Modrinth',
+
+    async search(query, instance, offset = 0) {
+      const facets = [['project_type:mod'], [`versions:${instance.version}`]];
+      if (instance.loader && instance.loader !== 'vanilla') {
+        facets.push(loaderTags(instance.loader).map(tag => `categories:${tag}`));
+      }
+
+      const url = `${MODRINTH}/search?limit=20&offset=${offset}` +
+        `&query=${encodeURIComponent(query || '')}` +
+        `&facets=${encodeURIComponent(JSON.stringify(facets))}` +
+        `&index=${query ? 'relevance' : 'downloads'}`;
+
+      const data = await fetchJson(url, { headers: MOD_API_HEADERS });
+      return {
+        total: data.total_hits,
+        mods: (data.hits || []).map(hit => ({
+          source: 'modrinth',
+          id: hit.project_id,
+          slug: hit.slug,
+          title: hit.title,
+          description: hit.description,
+          author: hit.author,
+          downloads: hit.downloads,
+          icon: hit.icon_url || null
+        }))
+      };
+    },
+
+    // The newest build of this mod that fits the pack. Returned rather than
+    // downloaded, so dependencies can be walked before anything is written.
+    async pickFile(projectId, instance) {
+      const loaders = JSON.stringify(loaderTags(instance.loader));
+      const versions = JSON.stringify([instance.version]);
+      const url = `${MODRINTH}/project/${encodeURIComponent(projectId)}/version` +
+        `?loaders=${encodeURIComponent(loaders)}&game_versions=${encodeURIComponent(versions)}`;
+
+      const builds = await fetchJson(url, { headers: MOD_API_HEADERS });
+      if (!Array.isArray(builds) || !builds.length) return null;
+
+      const build = builds[0];   // Newest first.
+      const file = build.files.find(entry => entry.primary) || build.files[0];
+      if (!file) return null;
+
+      return {
+        projectId,
+        versionId: build.id,
+        title: build.name,
+        filename: file.filename,
+        url: file.url,
+        sha1: file.hashes?.sha1 || null,
+        // Only what the mod cannot run without. Optional extras are the
+        // player's business, not ours to decide for them.
+        requires: (build.dependencies || [])
+          .filter(dependency => dependency.dependency_type === 'required' && dependency.project_id)
+          .map(dependency => dependency.project_id)
+      };
+    }
+  }
+};
+
+// What the pack has in it. The record is the launcher's own, but the folder
+// is the truth: a file dropped in by hand counts just as much as one we
+// fetched, and is listed so it can be seen and removed here.
+function listInstanceMods(instance) {
+  const folder = path.join(instanceFolder(instance), 'mods');
+  if (!fs.existsSync(folder)) return [];
+
+  const recordPath = path.join(instanceFolder(instance), 'mods.json');
+  let known = [];
+  try {
+    known = JSON.parse(fs.readFileSync(recordPath, 'utf-8'));
+  } catch {
+    known = [];
+  }
+
+  return fs.readdirSync(folder)
+    .filter(name => /\.jar$/i.test(name))
+    .map(name => {
+      const record = known.find(entry => entry.filename === name);
+      return {
+        filename: name,
+        title: record?.title || name.replace(/\.jar$/i, ''),
+        source: record?.source || null,
+        projectId: record?.projectId || null,
+        size: fs.statSync(path.join(folder, name)).size
+      };
+    })
+    .sort((a, b) => a.title.localeCompare(b.title));
+}
+
+function rememberMod(instance, entry) {
+  const recordPath = path.join(instanceFolder(instance), 'mods.json');
+  let known = [];
+  try {
+    known = JSON.parse(fs.readFileSync(recordPath, 'utf-8'));
+  } catch {
+    known = [];
+  }
+
+  known = known.filter(item => item.filename !== entry.filename);
+  known.push(entry);
+  fs.writeFileSync(recordPath, JSON.stringify(known, null, 2));
+}
+
+// Installs a mod and everything it cannot run without. A mod that quietly
+// fails to load because a library is missing is the launcher's fault, not the
+// player's, so the dependencies come along without being asked about.
+async function installMod(instance, source, projectId, seen = new Set()) {
+  if (seen.has(projectId)) return [];
+  seen.add(projectId);
+
+  const provider = modProviders[source];
+  if (!provider) throw new Error(`unknown source: ${source}`);
+
+  const file = await provider.pickFile(projectId, instance);
+  if (!file) return [{ projectId, ok: false, reason: 'no-build' }];
+
+  const folder = path.join(instanceFolder(instance), 'mods');
+  fs.mkdirSync(folder, { recursive: true });
+  const destination = path.join(folder, file.filename);
+
+  if (!fs.existsSync(destination)) {
+    const data = await fetchBuffer(file.url, { headers: MOD_API_HEADERS });
+
+    if (file.sha1) {
+      const got = crypto.createHash('sha1').update(data).digest('hex');
+      if (got !== file.sha1) throw new Error(`${file.filename}: the download does not match its hash`);
+    }
+    fs.writeFileSync(destination, data);
+  }
+
+  rememberMod(instance, {
+    filename: file.filename,
+    title: file.title,
+    source,
+    projectId,
+    versionId: file.versionId
+  });
+
+  const installed = [{ projectId, ok: true, filename: file.filename, title: file.title }];
+
+  for (const dependency of file.requires) {
+    installed.push(...await installMod(instance, source, dependency, seen));
+  }
+  return installed;
 }
 
 // Minecraft writes its own account of a crash here, and it says far more than
@@ -1876,8 +2227,8 @@ async function fetchWithRetry(url, options = {}, attempts = 3) {
   throw lastError;
 }
 
-async function fetchJson(url) {
-  return (await fetchWithRetry(url)).json();
+async function fetchJson(url, options = {}) {
+  return (await fetchWithRetry(url, options)).json();
 }
 
 // Writes the loader profile next to the vanilla versions. minecraft-launcher-core

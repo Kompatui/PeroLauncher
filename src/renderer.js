@@ -32,6 +32,10 @@ document.getElementById('tile-settings').addEventListener('click', () => {
   window.location.href = 'settings.html';
 });
 
+document.getElementById('tile-mods').addEventListener('click', () => {
+  window.location.href = 'mods.html';
+});
+
 const maxBtn = document.getElementById('btn-max');
 
 function renderMaxIcon(isMaximized) {

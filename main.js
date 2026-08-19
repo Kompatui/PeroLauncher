@@ -784,12 +784,14 @@ function forgeLoader() {
         await placeFmlLibrary(library, libDirectory);
       }
 
-      // Its name carries the game version; the hash lives in a build property
-      // we cannot read, so the file is trusted to be the archived original.
-      await placeFmlLibrary(
-        { name: `deobfuscation_data_${mcVersion}.zip`, sha1: null },
-        libDirectory
-      );
+      // Only 1.5 and later ask for this; FML in 1.3 and 1.4 has no idea it
+      // exists, and demanding it there would fail the launch over nothing.
+      if (needsDeobfuscationData(archive)) {
+        await placeFmlLibrary(
+          { name: `deobfuscation_data_${mcVersion}.zip`, sha1: null },
+          libDirectory
+        );
+      }
     }
   };
 }
@@ -829,6 +831,14 @@ function readFmlLibraryList(archive) {
   const hashes = strings.flatMap(value => value.match(/[0-9a-f]{40}/g) || []);
 
   return names.map((name, index) => ({ name, sha1: hashes[index] || null }));
+}
+
+// The runtime deobfuscation map arrived with FML 5, which shipped for 1.5.
+// Older builds never mention it, so the build itself is asked.
+function needsDeobfuscationData(archive) {
+  const entry = new AdmZip(archive).getEntry('cpw/mods/fml/relauncher/FMLInjectionData.class');
+  if (!entry) return false;
+  return entry.getData().toString('latin1').includes('deobfuscation_data_');
 }
 
 // Maven Central still carries the ordinary libraries untouched. The two Forge

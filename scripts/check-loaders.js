@@ -13,6 +13,9 @@
 //   node scripts/check-loaders.js
 //   node scripts/check-loaders.js 1.7.10 1.12.2 1.20
 
+const AdmZip = require('adm-zip');
+const { createHash } = require('crypto');
+
 const VERSIONS = process.argv.slice(2).length
   ? process.argv.slice(2)
   : ['1.5.2', '1.7.10', '1.11.2', '1.12.2', '1.16.5', '1.20', '1.21.1', '26.2'];
@@ -188,7 +191,13 @@ async function checkForge(mcVersion, metadata) {
       const classes = countClassEntries(archive);
       if (classes === 0) return { state: 'broken', note: `${name} holds no classes to overlay` };
 
-      return { state: 'ok', note: `${newest}, jar mod from ${name.split('-').pop()}, ${classes} classes` };
+      // The patched jar is only half of it: FML then wants its own libraries,
+      // and those addresses died in 2013.
+      const libraries = await checkFmlLibraries(mcVersion, build);
+      if (libraries.state !== 'ok') {
+        return { state: libraries.state, note: `${newest}, jar mod - ${libraries.note}` };
+      }
+      return { state: 'ok', note: `${newest}, jar mod, ${classes} classes, ${libraries.note}` };
     }
     return { state: 'broken', note: 'no universal or client archive published' };
   }
@@ -247,7 +256,119 @@ async function checkNeoforge(mcVersion, metadata) {
   return { state: 'ok', note: `${build}, installer ${Math.round(jar.length / 1024 / 1024)} MB${skippedNote}` };
 }
 
-const MARK = { ok: 'ok    ', absent: '-     ', broken: 'BROKEN', error: 'ERROR ' };
+// Same table and sources main.js uses to supply FML's dependencies.
+const FML_LIBRARY_ON_MAVEN = {
+  'guava-14.0-rc3.jar': 'com/google/guava/guava/14.0-rc3/guava-14.0-rc3.jar',
+  'guava-12.0.1.jar': 'com/google/guava/guava/12.0.1/guava-12.0.1.jar',
+  'asm-all-4.1.jar': 'org/ow2/asm/asm-all/4.1/asm-all-4.1.jar',
+  'asm-all-4.0.jar': 'org/ow2/asm/asm-all/4.0/asm-all-4.0.jar',
+  'bcprov-jdk15on-148.jar': 'org/bouncycastle/bcprov-jdk15on/1.48/bcprov-jdk15on-1.48.jar',
+  'bcprov-jdk15on-147.jar': 'org/bouncycastle/bcprov-jdk15on/1.47/bcprov-jdk15on-1.47.jar'
+};
+
+const FML_LIBRARY_ORIGIN = 'http://files.minecraftforge.net/fmllibs/';
+
+// Reading the requirement out of the build itself, exactly as the launcher does.
+function readFmlLibraryList(archive) {
+  const entry = new AdmZip(archive).getEntry('cpw/mods/fml/relauncher/CoreFMLLibraries.class');
+  if (!entry) return null;   // Forge older than FML.
+
+  const text = entry.getData().toString('latin1');
+  const strings = text.match(/[\x20-\x7e]{4,}/g) || [];
+  const names = strings.filter(value => /\.(jar|zip)$/.test(value));
+  const hashes = strings.flatMap(value => value.match(/[0-9a-f]{40}/g) || []);
+  return names.map((name, index) => ({ name, sha1: hashes[index] || null }));
+}
+
+async function archivedUrls(originalUrl) {
+  const index = 'https://web.archive.org/cdx/search/cdx' +
+    `?url=${encodeURIComponent(originalUrl)}&output=json&filter=statuscode:200&limit=-6`;
+  try {
+    const rows = await getJson(index);
+    if (!Array.isArray(rows) || rows.length < 2) return [];
+    return rows.slice(1).map(row => row[1]).reverse()
+      .map(stamp => `https://web.archive.org/web/${stamp}id_/${originalUrl}`);
+  } catch {
+    return [];
+  }
+}
+
+// Libraries repeat across versions, so a name is only ever resolved once.
+const libraryResults = new Map();
+
+async function canGetLibrary(library) {
+  if (libraryResults.has(library.name)) return libraryResults.get(library.name);
+
+  const sources = [];
+  if (FML_LIBRARY_ON_MAVEN[library.name]) {
+    sources.push(['maven', `https://repo1.maven.org/maven2/${FML_LIBRARY_ON_MAVEN[library.name]}`]);
+  }
+  for (const url of await archivedUrls(FML_LIBRARY_ORIGIN + library.name)) {
+    sources.push(['archive', url]);
+  }
+
+  let outcome = { ok: false, from: 'nowhere' };
+  for (const [where, url] of sources) {
+    try {
+      const data = await getBuffer(url);
+      const sha1 = createHash('sha1').update(data).digest('hex');
+      if (library.sha1 && sha1 !== library.sha1) continue;
+      outcome = { ok: true, from: where };
+      break;
+    } catch {
+      // Try the next source.
+    }
+  }
+
+  libraryResults.set(library.name, outcome);
+  return outcome;
+}
+
+async function checkFmlLibraries(mcVersion, build) {
+  let archive;
+  for (const name of [`forge-${build}-universal.zip`, `forge-${build}-client.zip`]) {
+    try {
+      archive = await getBuffer(`${FORGE_MAVEN}/${build}/${name}`);
+      break;
+    } catch {
+      // Try the other name.
+    }
+  }
+  if (!archive) return { state: 'broken', note: 'no archive' };
+
+  const required = readFmlLibraryList(archive);
+  if (required === null) {
+    return { state: 'warn', note: 'no FML in this build - needs ModLoader, which the launcher does not supply' };
+  }
+
+  // Only FML 5 and later use the deobfuscation map; asking for it on 1.3 or
+  // 1.4 would report a failure over a file those builds never wanted.
+  const injection = new AdmZip(archive).getEntry('cpw/mods/fml/relauncher/FMLInjectionData.class');
+  const wantsDeobfuscation = injection
+    ? injection.getData().toString('latin1').includes('deobfuscation_data_')
+    : false;
+
+  const wanted = wantsDeobfuscation
+    ? [...required, { name: `deobfuscation_data_${mcVersion}.zip`, sha1: null }]
+    : required;
+
+  const missing = [];
+  const fromArchive = [];
+  for (const library of wanted) {
+    const result = await canGetLibrary(library);
+    if (!result.ok) missing.push(library.name);
+    else if (result.from === 'archive') fromArchive.push(library.name);
+  }
+
+  if (missing.length) return { state: 'broken', note: `cannot obtain: ${missing.join(', ')}` };
+  return {
+    state: 'ok',
+    note: `${wanted.length} files available` +
+      (fromArchive.length ? `, ${fromArchive.length} only from the web archive` : '')
+  };
+}
+
+const MARK = { ok: 'ok    ', absent: '-     ', broken: 'BROKEN', error: 'ERROR ', warn: 'WARN  ' };
 
 (async () => {
   console.log(`Checking loaders for: ${VERSIONS.join(', ')}\n`);

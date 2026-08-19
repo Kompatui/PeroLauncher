@@ -55,7 +55,11 @@
   transition: transform 0.15s ease, background-color 0.15s ease;
 }
 
+/* Full height, like the loader tile beside it. Left to its own height it was
+   only as tall as its text, and darkening on hover lit up a band floating
+   inside the row instead of the row itself. */
 .row-main {
+  align-self: stretch;
   background: #e8e8e8;
 }
 
@@ -65,9 +69,12 @@
   z-index: 2;
 }
 
+/* A fuller orange, not a darker one. Going to #d97b18 dropped the brightness
+   as well as shifting the hue towards brown, and next to the quiet grey rows
+   that read as a jolt rather than a response. */
 .loader-badge:hover {
   transform: scale(1.03);
-  background: #d97b18;
+  background: #ff8c0a;
   z-index: 2;
 }
 
@@ -522,11 +529,13 @@
   color: #999;
 }
 
-/* Sits at the right edge of the version row and appears only once a mod
-   loader is chosen - it is the way back into that choice. */
 /* A tile of its own standing beside the version, not a button laid on top of
-   it. It was absolute before, which is why a narrow window slid it over the
-   version number instead of moving it aside. */
+   it, and the way back into the loader choice once one is made. It was
+   absolute before, which is why a narrow window slid it over the version
+   number instead of moving it aside.
+   No transition of its own here: this rule sits below the one that gives the
+   halves their transition, and naming only the colour meant the lift arrived
+   instantly while the shade eased in - which is what made it feel abrupt. */
 .loader-badge {
   align-self: stretch;
   flex-shrink: 0;
@@ -543,17 +552,12 @@
   font-size: 15px;
   font-family: inherit;
   cursor: pointer;
-  transition: background-color 0.15s ease;
 }
 
 .loader-badge-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.loader-badge:hover {
-  background: #d97b18;
 }
 
 .loader-badge.hidden {

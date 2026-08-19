@@ -41,14 +41,21 @@ async function loadSettingsUI() {
   const number = document.getElementById('ram-number');
   const autoCheckbox = document.getElementById('ram-auto');
 
-  slider.max = totalSystemRamMB;
+  // The slider counts 512 MiB steps rather than megabytes. Counting megabytes
+  // with a step of 512 put the machine's real total out of reach - 8070 is not
+  // 1024 plus a whole number of steps, so it stopped at 7680 and the last 390
+  // could not be chosen at all. Steps keep the arrow keys moving by a round
+  // amount, and the final one means "everything this machine has".
+  slider.min = 2;
+  slider.step = 1;
+  slider.max = topStep();
   number.max = totalSystemRamMB;
 
   autoCheckbox.checked = settings.ramAuto;
   updateRamDisabledState();
 
   const effectiveRam = settings.ramAuto ? autoRamValue() : settings.ram;
-  slider.value = effectiveRam;
+  slider.value = ramToStep(effectiveRam);
   number.value = effectiveRam;
 
   document.getElementById('win-w').value = settings.windowWidth;
@@ -102,27 +109,45 @@ document.getElementById('ram-auto').addEventListener('change', async (e) => {
   updateRamDisabledState();
   if (settings.ramAuto) {
     const val = autoRamValue();
-    document.getElementById('ram-slider').value = val;
+    document.getElementById('ram-slider').value = ramToStep(val);
     document.getElementById('ram-number').value = val;
     settings.ram = val;
   }
   await saveSettings();
 });
 
+// The last position on the slider. Rounding up rather than down is what makes
+// the machine's whole memory reachable when it is not a multiple of 512.
+function topStep() {
+  return Math.max(2, Math.ceil(totalSystemRamMB / 512));
+}
+
+function stepToRam(step) {
+  return Math.min(step * 512, totalSystemRamMB);
+}
+
+function ramToStep(mb) {
+  if (mb >= totalSystemRamMB) return topStep();
+  return Math.min(Math.max(Math.round(mb / 512), 2), topStep());
+}
+
 document.getElementById('ram-slider').addEventListener('input', (e) => {
-  document.getElementById('ram-number').value = e.target.value;
+  document.getElementById('ram-number').value = stepToRam(parseInt(e.target.value, 10));
 });
 
 document.getElementById('ram-slider').addEventListener('change', async (e) => {
-  settings.ram = parseInt(e.target.value, 10);
+  settings.ram = stepToRam(parseInt(e.target.value, 10));
   await saveSettings();
 });
 
 document.getElementById('ram-number').addEventListener('change', async (e) => {
   let val = parseInt(e.target.value, 10);
   if (isNaN(val)) val = 1024;
+  // Typed in by hand, so it is taken as given rather than rounded - only
+  // held inside what the machine has.
   val = Math.min(Math.max(val, 1024), totalSystemRamMB);
-  document.getElementById('ram-slider').value = val;
+  e.target.value = val;
+  document.getElementById('ram-slider').value = ramToStep(val);
   settings.ram = val;
   await saveSettings();
 });

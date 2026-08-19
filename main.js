@@ -73,6 +73,138 @@ function saveSettingsToDisk(settings) {
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 }
 
+// Signed-in accounts live in their own file rather than in settings.json.
+// What is kept is a refresh token - not a password, and not a key to the game
+// on its own, but still the thing that gets someone into the account. The
+// settings file is something a user will sooner or later copy, post in a chat
+// or hand over for help, and it must be safe to do that.
+const accountsPath = 'E:\\PeroLauncher\\accounts.json';
+
+function loadAccounts() {
+  if (!fs.existsSync(accountsPath)) return { activeId: null, accounts: [] };
+  try {
+    const parsed = JSON.parse(fs.readFileSync(accountsPath, 'utf-8'));
+    return {
+      activeId: parsed.activeId || null,
+      accounts: Array.isArray(parsed.accounts) ? parsed.accounts : []
+    };
+  } catch {
+    // A damaged file must not lock the player out of the launcher: they can
+    // always sign in again, which rewrites it.
+    return { activeId: null, accounts: [] };
+  }
+}
+
+function saveAccounts(store) {
+  fs.mkdirSync(path.dirname(accountsPath), { recursive: true });
+  fs.writeFileSync(accountsPath, JSON.stringify(store, null, 2));
+}
+
+// What the pages are allowed to see. The tokens never leave the main process.
+function publicAccounts(store) {
+  return {
+    activeId: store.activeId,
+    accounts: store.accounts.map(account => ({
+      id: account.id,
+      name: account.name,
+      uuid: account.uuid,
+      type: account.type || 'microsoft',
+      addedAt: account.addedAt
+    }))
+  };
+}
+
+// The name a player types is all an offline account has, so the identity is
+// derived from it the same way a Minecraft server does when it is not
+// checking sessions: an MD5 of "OfflinePlayer:<name>" dressed up as a version
+// 3 UUID. Matching that exactly is what makes the inventory and the world
+// data follow the name on a LAN game or a server in offline mode.
+function offlineUuid(name) {
+  const hash = crypto.createHash('md5').update(`OfflinePlayer:${name}`).digest();
+  hash[6] = (hash[6] & 0x0f) | 0x30;
+  hash[8] = (hash[8] & 0x3f) | 0x80;
+
+  const hex = hash.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+// Minecraft has always refused names outside this shape, and a server would
+// reject one anyway. Better to say so while the player is typing than to fail
+// at launch.
+// Length is judged first so that an empty field is answered with "3 to 16
+// characters" rather than a complaint about characters that are not there.
+function offlineNameProblem(name) {
+  if (name.length < 3 || name.length > 16) return 'length';
+  if (!/^[A-Za-z0-9_]+$/.test(name)) return 'characters';
+  return null;
+}
+
+// An offline session carries no tokens because there are none: nothing was
+// signed in. The game accepts it and runs; a server that verifies sessions
+// will not let it in, which is exactly what "offline" means.
+function offlineSession(account) {
+  return {
+    id: account.id,
+    name: account.name,
+    uuid: account.uuid,
+    mclc: {
+      access_token: '0',
+      client_token: '0',
+      uuid: account.uuid,
+      name: account.name,
+      user_properties: '{}',
+      meta: { type: 'mojang', demo: false }
+    }
+  };
+}
+
+function rememberAccount(store, minecraft, refreshToken) {
+  const id = minecraft.profile.id;
+  const record = {
+    id,
+    type: 'microsoft',
+    name: minecraft.profile.name,
+    uuid: minecraft.profile.id,
+    refreshToken,
+    addedAt: new Date().toISOString()
+  };
+
+  // Signing into an account that is already saved updates it instead of
+  // adding a second copy of the same person.
+  const existing = store.accounts.findIndex(account => account.id === id);
+  if (existing === -1) store.accounts.push(record);
+  else store.accounts[existing] = { ...store.accounts[existing], ...record };
+
+  store.activeId = id;
+  saveAccounts(store);
+  return record;
+}
+
+// Turns a saved account into something the game can be launched with, without
+// showing a login window. Microsoft hands out a new refresh token each time,
+// so the saved one is replaced - keeping the old one is how an account
+// quietly stops working after a while.
+async function sessionFromSaved(account) {
+  const auth = new Auth('select_account');
+  const xbox = await auth.refresh(account.refreshToken);
+  const minecraft = await xbox.getMinecraft();
+
+  const store = loadAccounts();
+  const saved = store.accounts.find(entry => entry.id === account.id);
+  if (saved) {
+    saved.refreshToken = xbox.save();
+    saved.name = minecraft.profile.name;   // The player may have renamed.
+    saveAccounts(store);
+  }
+
+  return {
+    id: minecraft.profile.id,
+    name: minecraft.profile.name,
+    uuid: minecraft.profile.id,
+    mclc: minecraft.mclc()
+  };
+}
+
 // Without this the launcher would fall back to Russian on every restart,
 // no matter what language the user picked in the settings.
 currentLocale = loadSettings().language || 'ru';
@@ -151,20 +283,114 @@ ipcMain.handle('pick-java', async () => {
   return result.filePaths[0];
 });
 
+// Opens the Microsoft window. Only for adding an account - never on the way
+// into the game, where a saved account is used instead.
 ipcMain.handle('login-microsoft', async () => {
-  const authManager = new Auth("select_account");
-  const xboxManager = await authManager.launch("electron", { parent: BrowserWindow.getFocusedWindow() });
-  const token = await xboxManager.getMinecraft();
+  const auth = new Auth('select_account');
+  const xbox = await auth.launch('electron', { parent: BrowserWindow.getFocusedWindow() });
+  const minecraft = await xbox.getMinecraft();
 
+  const store = loadAccounts();
+  const record = rememberAccount(store, minecraft, xbox.save());
+
+  // Kept so the settings page still has a name to show without unlocking
+  // anything, and so an older settings.json keeps working.
   const settings = loadSettings();
-  settings.accountName = token.profile.name;
+  settings.accountName = record.name;
   saveSettingsToDisk(settings);
 
   return {
-    name: token.profile.name,
-    uuid: token.profile.id,
-    mclc: token.mclc()
+    id: record.id,
+    name: record.name,
+    uuid: record.uuid,
+    mclc: minecraft.mclc()
   };
+});
+
+// An account that is only a name. No sign-in, no servers that check
+// sessions - single player, a LAN game, or a server running in offline mode.
+ipcMain.handle('add-offline-account', (event, rawName) => {
+  const name = String(rawName || '').trim();
+
+  const problem = offlineNameProblem(name);
+  if (problem) return { ok: false, reason: problem };
+
+  const uuid = offlineUuid(name);
+  const store = loadAccounts();
+
+  if (store.accounts.some(account => account.type === 'offline' && account.uuid === uuid)) {
+    return { ok: false, reason: 'exists' };
+  }
+
+  store.accounts.push({
+    id: `offline:${uuid}`,
+    type: 'offline',
+    name,
+    uuid,
+    addedAt: new Date().toISOString()
+  });
+  store.activeId = `offline:${uuid}`;
+  saveAccounts(store);
+
+  const settings = loadSettings();
+  settings.accountName = name;
+  saveSettingsToDisk(settings);
+
+  return { ok: true, store: publicAccounts(store) };
+});
+
+ipcMain.handle('get-accounts', () => publicAccounts(loadAccounts()));
+
+ipcMain.handle('set-active-account', (event, id) => {
+  const store = loadAccounts();
+  if (!store.accounts.some(account => account.id === id)) return publicAccounts(store);
+
+  store.activeId = id;
+  saveAccounts(store);
+
+  const settings = loadSettings();
+  settings.accountName = store.accounts.find(account => account.id === id).name;
+  saveSettingsToDisk(settings);
+
+  return publicAccounts(store);
+});
+
+ipcMain.handle('remove-account', (event, id) => {
+  const store = loadAccounts();
+  store.accounts = store.accounts.filter(account => account.id !== id);
+
+  // Removing the one in use hands the place to whoever is left, so the
+  // launcher is never left pointing at an account that is gone.
+  if (store.activeId === id) store.activeId = store.accounts[0]?.id || null;
+  saveAccounts(store);
+
+  const settings = loadSettings();
+  settings.accountName = store.accounts.find(account => account.id === store.activeId)?.name || null;
+  saveSettingsToDisk(settings);
+
+  return publicAccounts(store);
+});
+
+// The session the game is started with. Returns null when there is nothing
+// saved, so the caller knows to ask the player to sign in rather than
+// showing an error over something that is not broken.
+ipcMain.handle('get-session', async () => {
+  const store = loadAccounts();
+  const account = store.accounts.find(entry => entry.id === store.activeId);
+  if (!account) return { ok: false, reason: 'no-account' };
+
+  // Nothing to refresh and nobody to ask: an offline account works with the
+  // network down, which is half the point of having one.
+  if (account.type === 'offline') return { ok: true, profile: offlineSession(account) };
+
+  try {
+    return { ok: true, profile: await sessionFromSaved(account) };
+  } catch (e) {
+    // Microsoft can refuse a token that is too old or was revoked. That is
+    // not a failure to report as a crash - the account simply has to be
+    // signed into again.
+    return { ok: false, reason: 'expired', name: account.name, error: e.message };
+  }
 });
 
 ipcMain.handle('launch-game', async (event, profile) => {
@@ -283,6 +509,14 @@ ipcMain.handle('launch-game', async (event, profile) => {
     }
   }
 
+  // Mod settings are written into one shared folder by every version, and
+  // they are not written the same way. Each version gets its own set.
+  try {
+    useConfigOf(settings.gameFolder, `${settings.version}-${settings.loader || 'vanilla'}`);
+  } catch (e) {
+    console.log('Could not swap the config folder:', e.message);
+  }
+
   launcher.launch(opts);
 
   launcher.on('debug', (e) => console.log('[DEBUG]', e));
@@ -307,6 +541,47 @@ ipcMain.handle('launch-game', async (event, profile) => {
 
   return { started: true, error: null };
 });
+
+// Every version writes its mod settings into the same config folder, and the
+// formats are not the same. Forge for 1.6.4 writes lists as
+//
+//   I:biomeSkyBlendRange <
+//       20
+//   >
+//
+// and Forge for 1.4.2 has never heard of that, so it dies on the file with
+// "unknown character" before the game window appears. The player did nothing
+// wrong: they played a newer version once.
+//
+// So the folder belongs to one version at a time. The one on its way out is
+// put away under its own name and brought back when that version is played
+// again. Worlds, resource packs and screenshots stay shared, which is what
+// people actually want shared.
+function useConfigOf(gameFolder, versionKey) {
+  const configDir = path.join(gameFolder, 'config');
+  const store = path.join(gameFolder, 'config-per-version');
+  const ownerFile = path.join(store, 'owner.txt');
+
+  const key = versionKey.replace(/[^A-Za-z0-9._-]/g, '_');
+  const owner = fs.existsSync(ownerFile) ? fs.readFileSync(ownerFile, 'utf-8').trim() : null;
+  if (owner === key) return;
+
+  fs.mkdirSync(store, { recursive: true });
+
+  // Put the outgoing settings away. Without a recorded owner there is no
+  // telling whose they are, so they are kept aside rather than thrown out.
+  if (fs.existsSync(configDir)) {
+    const kept = path.join(store, owner || 'unclaimed');
+    fs.rmSync(kept, { recursive: true, force: true });
+    fs.renameSync(configDir, kept);
+  }
+
+  const mine = path.join(store, key);
+  if (fs.existsSync(mine)) fs.renameSync(mine, configDir);
+  else fs.mkdirSync(configDir, { recursive: true });
+
+  fs.writeFileSync(ownerFile, key);
+}
 
 // Without this the launcher stays silent and the game just blinks and
 // disappears, which tells the player nothing at all.

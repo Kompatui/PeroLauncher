@@ -313,6 +313,126 @@ document.getElementById('row-version').addEventListener('click', async () => {
   search.focus();
 });
 
+// Everything about accounts lives behind one row, the same way the version and
+// the loader do. The list is the whole feature: pick who plays, add someone,
+// drop someone.
+document.getElementById('row-account').addEventListener('click', () => openAccounts());
+
+async function openAccounts(store) {
+  const data = store || await window.api.getAccounts();
+  const accounts = data.accounts;
+
+  const rows = accounts.length
+    ? accounts.map(account => `
+        <div class="account-row${account.id === data.activeId ? ' current' : ''}" data-id="${account.id}">
+          <span class="account-name">${escapeHtml(account.name)}</span>
+          <span class="account-meta">
+            ${account.id === data.activeId ? `<span class="account-active">${t('account.active')}</span>` : ''}
+            <span class="account-type">${account.type === 'offline' ? t('account.typeOffline') : t('account.typeMicrosoft')}</span>
+            <button class="account-remove" data-remove="${account.id}" title="${t('account.remove')}">×</button>
+          </span>
+        </div>
+      `).join('')
+    : `<p class="modal-note">${t('account.empty')}</p>`;
+
+  modalBox.innerHTML = `
+    <h3>${t('account.title')}</h3>
+    <div class="account-list">${rows}</div>
+    <div class="account-actions">
+      <button class="modal-btn" id="add-microsoft">${t('account.addMicrosoft')}</button>
+      <button class="modal-btn" id="add-offline">${t('account.addOffline')}</button>
+    </div>
+    ${closeButtonHtml()}
+  `;
+  overlay.classList.remove('hidden');
+  wireCloseButton();
+
+  // Switching who plays.
+  modalBox.querySelectorAll('.account-row').forEach(row => {
+    row.addEventListener('click', async (event) => {
+      if (event.target.dataset.remove) return;   // The × is its own action.
+      const updated = await window.api.setActiveAccount(row.dataset.id);
+      settings.accountName = accounts.find(a => a.id === row.dataset.id).name;
+      renderTranslatedValues();
+      openAccounts(updated);
+    });
+  });
+
+  modalBox.querySelectorAll('.account-remove').forEach(button => {
+    button.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      const updated = await window.api.removeAccount(button.dataset.remove);
+      settings.accountName = updated.accounts.find(a => a.id === updated.activeId)?.name || null;
+      renderTranslatedValues();
+      openAccounts(updated);
+    });
+  });
+
+  document.getElementById('add-microsoft').addEventListener('click', async () => {
+    modalBox.innerHTML = `<h3>${t('account.title')}</h3><p class="modal-note">${t('account.signingIn')}</p>`;
+    try {
+      const profile = await window.api.loginMicrosoft();
+      settings.accountName = profile.name;
+      renderTranslatedValues();
+      openAccounts();
+    } catch (e) {
+      // Closing the Microsoft window counts as a refusal, not a fault, so it
+      // returns to the list instead of showing a failure over nothing.
+      console.log('Microsoft sign-in did not complete:', e.message);
+      openAccounts();
+    }
+  });
+
+  document.getElementById('add-offline').addEventListener('click', openOfflineForm);
+}
+
+function openOfflineForm() {
+  modalBox.innerHTML = `
+    <h3>${t('account.offlineTitle')}</h3>
+    <p class="modal-note explain">${t('account.offlineExplain')}</p>
+    <input type="text" id="offline-name" class="modal-search" maxlength="16"
+           placeholder="${t('account.namePlaceholder')}">
+    <p class="modal-note warn hidden" id="offline-problem"></p>
+    <div class="modal-buttons">
+      <button class="modal-btn" id="offline-add">${t('account.add')}</button>
+      <button class="modal-btn-cancel" id="modal-cancel">${t('modal.close')}</button>
+    </div>
+  `;
+  document.getElementById('modal-cancel').addEventListener('click', () => openAccounts());
+
+  const field = document.getElementById('offline-name');
+  const problem = document.getElementById('offline-problem');
+
+  const PROBLEM_TEXT = {
+    characters: 'account.nameBadCharacters',
+    length: 'account.nameBadLength',
+    exists: 'account.nameBadExists'
+  };
+
+  async function submit() {
+    const result = await window.api.addOfflineAccount(field.value);
+    if (!result.ok) {
+      problem.textContent = t(PROBLEM_TEXT[result.reason] || 'account.signInFailed');
+      problem.classList.remove('hidden');
+      return;
+    }
+    settings.accountName = field.value.trim();
+    renderTranslatedValues();
+    openAccounts(result.store);
+  }
+
+  document.getElementById('offline-add').addEventListener('click', submit);
+  field.addEventListener('keydown', event => { if (event.key === 'Enter') submit(); });
+  field.focus();
+}
+
+// Names come from the player and from Microsoft, and both end up inside markup.
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, char => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]
+  ));
+}
+
 const MOD_LOADER_NAMES = {
   fabric: 'Fabric',
   quilt: 'Quilt',
@@ -545,4 +665,11 @@ document.getElementById('item-language').addEventListener('click', () => {
 });
 
 // Wait for the dictionary: the page draws captions through t().
-translationsReady.then(loadSettingsUI);
+translationsReady.then(async () => {
+  await loadSettingsUI();
+
+  // Sent here by the play tile because there is nobody to play as. Opening
+  // the list straight away saves the player hunting for the row that explains
+  // why nothing happened.
+  if (window.location.hash === '#accounts') openAccounts();
+});

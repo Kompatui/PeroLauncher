@@ -3,7 +3,21 @@ document.getElementById('btn-max').addEventListener('click', () => window.api.ma
 document.getElementById('btn-close').addEventListener('click', () => window.api.close());
 
 document.getElementById('tile-play').addEventListener('click', async () => {
-  const profile = await window.api.loginMicrosoft();
+  // A saved account first. Signing in on every click was never necessary -
+  // the session simply was not being kept.
+  const session = await window.api.getSession();
+
+  // Nobody to play as yet. Opening the Microsoft window here would hide the
+  // fact that an offline account is also an option, so the account list is
+  // shown instead and both ways are on screen.
+  if (!session.ok && session.reason === 'no-account') {
+    window.location.href = 'settings.html#accounts';
+    return;
+  }
+
+  // The saved sign-in went stale, which only happens to a Microsoft account.
+  const profile = session.ok ? session.profile : await window.api.loginMicrosoft();
+
   console.log('Signed in as:', profile.name, profile.uuid);
   console.log('Launching the game...');
   const result = await window.api.launchGame(profile);

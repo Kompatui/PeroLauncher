@@ -173,6 +173,10 @@
   border-radius: 4px;
 }
 
+.modal-note.hidden {
+  display: none;
+}
+
 .modal-note.warn {
   color: #8a5a00;
   background: #fdf3e0;
@@ -237,6 +241,91 @@
   padding: 2px 6px;
   border-radius: 3px;
   font-size: 12px;
+}
+
+/* Accounts. Laid out like the version list, because it answers the same kind
+   of question: which one of these is in use. */
+.account-list {
+  max-height: 40vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 340px;
+}
+
+.account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 15px;
+}
+
+.account-row:hover {
+  background: #f0f0f0;
+}
+
+.account-row.current {
+  background: #e8f3e9;
+  font-weight: bold;
+}
+
+.account-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #888;
+  white-space: nowrap;
+  font-weight: normal;
+}
+
+.account-active {
+  background: #cfe6d2;
+  color: #2f6b36;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.account-type {
+  background: #e0e0e0;
+  color: #555;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+/* Deliberately quiet until pointed at: removing an account is not something
+   to invite with a bright button sitting next to a name. */
+.modal-box .account-remove {
+  padding: 0 6px;
+  font-size: 18px;
+  line-height: 1;
+  background: none;
+  color: #bbb;
+}
+
+.modal-box .account-remove:hover {
+  color: #c0392b;
+}
+
+.account-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.modal-box .modal-btn {
+  background: #e8e8e8;
+}
+
+.modal-box .modal-btn:hover {
+  background: #dcdcdc;
 }
 
 .modal-lang-option {

@@ -8,6 +8,8 @@ userdata/
 loaders/
 java/
 settings.json
+# Holds the refresh tokens of every signed-in account.
+accounts.json
 versions-cache.json
 java-versions.json
 

@@ -40,10 +40,35 @@
   background: #d8d8d8;
 }
 
-/* Not a button of its own, so it does not lift on its own - the row it lives
-   in does that. It only deepens in colour. */
-.settings-row.compact:hover .loader-badge {
+/* The version row is two choices side by side, not one: the left half picks
+   the game version, the tile on the right picks the loader. They lift apart,
+   because reacting together would say they are one button. */
+#row-version:hover {
+  transform: none;
+  background: #e8e8e8;
+}
+
+.row-main,
+.loader-badge {
+  position: relative;
+  z-index: 1;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.row-main {
+  background: #e8e8e8;
+}
+
+.row-main:hover {
+  transform: scale(1.03);
+  background: #d8d8d8;
+  z-index: 2;
+}
+
+.loader-badge:hover {
+  transform: scale(1.03);
   background: #d97b18;
+  z-index: 2;
 }
 
 /* The same pastel family as the tiles on the main screen, and the same rule

@@ -115,9 +115,28 @@ async function openPack(id) {
   const pack = store.instances.find(entry => entry.id === id);
   if (!pack) return showPacks();
 
-  const mods = await window.api.listInstanceMods(id);
+  const mods = await window.api.listInstanceMods(id, 'mod');
+  const resourcePacks = await window.api.listInstanceMods(id, 'resourcepack');
   const isActive = store.activeId === id;
   const canHaveMods = pack.loader && pack.loader !== 'vanilla';
+
+  // One list per kind, and a kind with nothing in it is not shown at all
+  // rather than as an empty heading.
+  const contentList = (items, heading, kind) => !items.length ? '' : `
+    <h3 class="content-heading">${heading}</h3>
+    <div class="mod-list">
+      ${items.map(item => `
+        <div class="mod-row">
+          <span class="mod-main">
+            <span class="mod-title">${escapeHtml(item.title)}</span>
+            <span class="mod-file">${escapeHtml(item.filename)}</span>
+          </span>
+          <button class="mod-remove" data-file="${escapeHtml(item.filename)}" data-kind="${kind}"
+                  title="${t('packs.removeMod')}">×</button>
+        </div>
+      `).join('')}
+    </div>
+  `;
 
   page.innerHTML = `
     <div class="pack-head">
@@ -130,23 +149,17 @@ async function openPack(id) {
       <button class="modal-btn${isActive ? ' chosen' : ''}" id="use-pack" ${isActive ? 'disabled' : ''}>
         ${isActive ? t('packs.inUse') : t('packs.use')}
       </button>
-      ${canHaveMods ? `<button class="modal-btn" id="add-mods">${t('packs.addMods')}</button>` : ''}
+      <button class="modal-btn" id="add-mods">${t('packs.addContent')}</button>
       <button class="modal-btn" id="open-folder">${t('packs.openFolder')}</button>
       <button class="modal-btn danger" id="delete-pack">${t('packs.delete')}</button>
     </div>
 
     ${canHaveMods ? '' : `<p class="modal-note explain">${t('packs.vanillaNoMods')}</p>`}
 
-    <div class="mod-list" id="mod-list">
-      ${mods.length ? mods.map(mod => `
-        <div class="mod-row">
-          <span class="mod-main">
-            <span class="mod-title">${escapeHtml(mod.title)}</span>
-            <span class="mod-file">${escapeHtml(mod.filename)}</span>
-          </span>
-          <button class="mod-remove" data-file="${escapeHtml(mod.filename)}" title="${t('packs.removeMod')}">×</button>
-        </div>
-      `).join('') : `<p class="modal-note">${canHaveMods ? t('packs.noMods') : ''}</p>`}
+    <div id="content-lists">
+      ${contentList(mods, t('packs.kindMods'), 'mod')}
+      ${contentList(resourcePacks, t('packs.kindResourcePacks'), 'resourcepack')}
+      ${mods.length || resourcePacks.length ? '' : `<p class="modal-note">${t('packs.nothingInPack')}</p>`}
     </div>
   `;
 
@@ -165,14 +178,16 @@ async function openPack(id) {
     });
   }
 
-  if (canHaveMods) {
-    document.getElementById('add-mods').addEventListener('click', () => browseMods(pack));
-  }
+  // A pack without a loader can still take texture packs, so the way in is
+  // always open - it just opens on the kind that applies.
+  document.getElementById('add-mods').addEventListener('click', () => {
+    browseMods(pack, canHaveMods ? 'mod' : 'resourcepack');
+  });
 
   page.querySelectorAll('.mod-remove').forEach(button => {
     button.addEventListener('click', async (event) => {
       event.stopPropagation();
-      await window.api.removeInstanceMod(id, button.dataset.file);
+      await window.api.removeInstanceMod(id, button.dataset.file, button.dataset.kind);
       openPack(id);
     });
   });
@@ -187,13 +202,9 @@ function shortNumber(value) {
   return String(value ?? 0);
 }
 
-// Every category Modrinth files a mod under, in the order it lists them.
-const CATEGORIES = [
-  'adventure', 'cursed', 'decoration', 'economy', 'equipment', 'food',
-  'game-mechanics', 'library', 'magic', 'management', 'minigame', 'mobs',
-  'optimization', 'social', 'storage', 'technology', 'transportation',
-  'utility', 'worldgen'
-];
+// Filled from Modrinth's own list of categories, per kind of content, so it
+// cannot drift from the real one. Empty until it arrives.
+let CATEGORIES = {};
 
 // A slug the launcher knows becomes a word; one it does not is shown as it
 // came, which is better than hiding a category we have never heard of.
@@ -233,19 +244,34 @@ function modCard(mod, alreadyIn) {
 
 // A page of its own rather than a dialog: a catalogue needs the whole window,
 // and a box in the middle of the screen was cutting the list in half.
-async function browseMods(pack) {
-  const installed = await window.api.listInstanceMods(pack.id);
+async function browseMods(pack, kind = 'mod') {
+  if (!Object.keys(CATEGORIES).length) CATEGORIES = await window.api.getModCategories();
+
+  const installed = await window.api.listInstanceMods(pack.id, kind);
   const have = new Set(installed.map(mod => mod.projectId).filter(Boolean));
+
+  // A texture pack fits any loader, so a pack without one can still have them.
+  const kinds = [
+    { id: 'mod', label: t('packs.kindMods'), only: pack.loader && pack.loader !== 'vanilla' },
+    { id: 'resourcepack', label: t('packs.kindResourcePacks'), only: true }
+  ].filter(entry => entry.only);
 
   page.innerHTML = `
     <div class="browse-head">
       <button class="link-btn" id="to-pack">${t('packs.backToPack')}</button>
       <div class="browse-title">
-        <h2>${t('packs.addMods')}</h2>
+        <h2>${t('packs.addContent')}</h2>
         <span class="browse-for">${escapeHtml(pack.name)} · ${escapeHtml(pack.version)} · ${escapeHtml(loaderLabel(pack))}</span>
       </div>
+
+      <div class="kind-tabs">
+        ${kinds.map(entry => `
+          <button class="kind-tab${entry.id === kind ? ' current' : ''}" data-kind="${entry.id}">${entry.label}</button>
+        `).join('')}
+      </div>
+
       <input type="text" id="mod-search" class="browse-search" placeholder="${t('packs.searchPlaceholder')}">
-      <p class="browse-hint">${t('packs.searchHint')}</p>
+      <p class="browse-hint">${kind === 'mod' ? t('packs.searchHint') : t('packs.searchHintPacks')}</p>
     </div>
 
     <div class="browse-body">
@@ -255,7 +281,7 @@ async function browseMods(pack) {
           <button class="link-btn hidden" id="clear-categories">${t('packs.clearCategories')}</button>
         </div>
         <div class="category-list">
-          ${CATEGORIES.map(slug => `
+          ${(CATEGORIES[kind] || []).map(slug => `
             <label class="category-row">
               <input type="checkbox" value="${escapeHtml(slug)}">
               <span>${escapeHtml(categoryName(slug))}</span>
@@ -272,6 +298,12 @@ async function browseMods(pack) {
   `;
 
   document.getElementById('to-pack').addEventListener('click', () => openPack(pack.id));
+
+  page.querySelectorAll('.kind-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      if (tab.dataset.kind !== kind) browseMods(pack, tab.dataset.kind);
+    });
+  });
 
   const field = document.getElementById('mod-search');
   const cards = document.getElementById('mod-cards');
@@ -307,7 +339,7 @@ async function browseMods(pack) {
         button.disabled = true;
         button.textContent = t('packs.installing');
 
-        const result = await window.api.installMod(pack.id, card.dataset.source, card.dataset.id);
+        const result = await window.api.installMod(pack.id, card.dataset.source, card.dataset.id, kind);
 
         if (!result.ok) {
           button.textContent = t('packs.installFailed');
@@ -330,7 +362,7 @@ async function browseMods(pack) {
     if (!offset) cards.innerHTML = `<p class="modal-note">${t('packs.searching')}</p>`;
     more.innerHTML = '';
 
-    const data = await window.api.searchMods(pack.id, query, offset, chosen);
+    const data = await window.api.searchMods(pack.id, query, offset, chosen, kind);
     if (mine !== round) return;
 
     if (data.error) {

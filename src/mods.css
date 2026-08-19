@@ -229,6 +229,49 @@
   color: #888;
 }
 
+/* Mods and texture packs are different things, not different filters on one
+   thing, so they get a switch of their own rather than a category. */
+.kind-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 14px 0 12px;
+}
+
+.kind-tab {
+  padding: 7px 16px;
+  border: none;
+  border-radius: 20px;
+  background: #f0f0f0;
+  color: #555;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.kind-tab:hover {
+  background: #e4e4e4;
+}
+
+.kind-tab.current {
+  background: #00af5c;
+  color: #fff;
+  font-weight: 600;
+}
+
+.content-heading {
+  margin: 20px 0 8px;
+  font-size: 13px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #888;
+}
+
+.content-heading:first-child {
+  margin-top: 0;
+}
+
 .browse-search {
   width: 100%;
   box-sizing: border-box;

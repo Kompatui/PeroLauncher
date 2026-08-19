@@ -488,7 +488,8 @@ ipcMain.handle('get-instances', () => {
     instances: store.instances.map(instance => ({
       ...instance,
       folder: instanceFolder(instance),
-      modCount: listInstanceMods(instance).length
+      modCount: listInstanceContent(instance, 'mod').length,
+      packCount: listInstanceContent(instance, 'resourcepack').length
     }))
   };
 });
@@ -559,37 +560,40 @@ ipcMain.handle('open-instance-folder', (event, id) => {
   if (instance) shell.openPath(instanceFolder(instance));
 });
 
-ipcMain.handle('list-instance-mods', (event, id) => {
+ipcMain.handle('list-instance-mods', (event, id, kind) => {
   const instance = loadInstances().instances.find(entry => entry.id === id);
-  return instance ? listInstanceMods(instance) : [];
+  return instance ? listInstanceContent(instance, kind || 'mod') : [];
 });
 
-ipcMain.handle('remove-instance-mod', (event, id, filename) => {
+ipcMain.handle('remove-instance-mod', (event, id, filename, kind) => {
   const instance = loadInstances().instances.find(entry => entry.id === id);
-  if (!instance || filename !== path.basename(filename)) return { ok: false };
+  const spec = CONTENT_KINDS[kind || 'mod'];
+  if (!instance || !spec || filename !== path.basename(filename)) return { ok: false };
 
-  const file = path.join(instanceFolder(instance), 'mods', filename);
-  if (fs.existsSync(file)) fs.rmSync(file);
+  const file = path.join(instanceFolder(instance), spec.folder, filename);
+  if (fs.existsSync(file)) fs.rmSync(file, { recursive: true, force: true });
   return { ok: true };
 });
 
-ipcMain.handle('search-mods', async (event, id, query, offset, categories) => {
+ipcMain.handle('get-mod-categories', () => modrinthCategories());
+
+ipcMain.handle('search-mods', async (event, id, query, offset, categories, kind) => {
   const instance = loadInstances().instances.find(entry => entry.id === id);
   if (!instance) return { error: 'no-instance' };
 
   try {
-    return await modProviders.modrinth.search(query, instance, offset || 0, categories || []);
+    return await modProviders.modrinth.search(query, instance, offset || 0, categories || [], kind || 'mod');
   } catch (e) {
     return { error: e.message };
   }
 });
 
-ipcMain.handle('install-mod', async (event, id, source, projectId) => {
+ipcMain.handle('install-mod', async (event, id, source, projectId, kind) => {
   const instance = loadInstances().instances.find(entry => entry.id === id);
   if (!instance) return { ok: false, error: 'no-instance' };
 
   try {
-    return { ok: true, installed: await installMod(instance, source, projectId) };
+    return { ok: true, installed: await installMod(instance, source, projectId, kind || 'mod') };
   } catch (e) {
     return { ok: false, error: e.message };
   }
@@ -819,14 +823,51 @@ function loaderTags(loader) {
   return [loader];
 }
 
+// What a pack can be given, and where each kind belongs once it arrives.
+// A texture pack is not a category of mod - it is a different kind of thing
+// entirely, which is why asking only for mods made them impossible to find.
+const CONTENT_KINDS = {
+  mod: { type: 'mod', folder: 'mods', extension: '.jar' },
+  resourcepack: { type: 'resourcepack', folder: 'resourcepacks', extension: '.zip' }
+};
+
+// Texture packs are made for the game, not for a loader.
+function kindLoaders(kind, instance) {
+  return kind === 'resourcepack' ? ['minecraft'] : loaderTags(instance.loader);
+}
+
+// The categories each kind is filed under, taken from Modrinth rather than
+// written down here - a list kept by hand drifts from the real one, and the
+// player is the one who finds out.
+const categoriesCachePath = 'E:\\PeroLauncher\\modrinth-categories.json';
+
+async function modrinthCategories() {
+  try {
+    const tags = await fetchJson(`${MODRINTH}/tag/category`, { headers: MOD_API_HEADERS });
+    const grouped = {};
+    for (const tag of tags) (grouped[tag.project_type] ||= []).push(tag.name);
+    fs.writeFileSync(categoriesCachePath, JSON.stringify(grouped));
+    return grouped;
+  } catch {
+    // The catalogue still works without them; the filters simply do not show.
+    try {
+      return JSON.parse(fs.readFileSync(categoriesCachePath, 'utf-8'));
+    } catch {
+      return {};
+    }
+  }
+}
+
 const modProviders = {
   modrinth: {
     id: 'modrinth',
     name: 'Modrinth',
 
-    async search(query, instance, offset = 0, categories = []) {
-      const facets = [['project_type:mod'], [`versions:${instance.version}`]];
-      if (instance.loader && instance.loader !== 'vanilla') {
+    async search(query, instance, offset = 0, categories = [], kind = 'mod') {
+      const facets = [[`project_type:${kind}`], [`versions:${instance.version}`]];
+
+      // Only mods care which loader is underneath them.
+      if (kind === 'mod' && instance.loader && instance.loader !== 'vanilla') {
         facets.push(loaderTags(instance.loader).map(tag => `categories:${tag}`));
       }
 
@@ -866,8 +907,8 @@ const modProviders = {
 
     // The newest build of this mod that fits the pack. Returned rather than
     // downloaded, so dependencies can be walked before anything is written.
-    async pickFile(projectId, instance) {
-      const loaders = JSON.stringify(loaderTags(instance.loader));
+    async pickFile(projectId, instance, kind = 'mod') {
+      const loaders = JSON.stringify(kindLoaders(kind, instance));
       const versions = JSON.stringify([instance.version]);
       const url = `${MODRINTH}/project/${encodeURIComponent(projectId)}/version` +
         `?loaders=${encodeURIComponent(loaders)}&game_versions=${encodeURIComponent(versions)}`;
@@ -899,8 +940,11 @@ const modProviders = {
 // What the pack has in it. The record is the launcher's own, but the folder
 // is the truth: a file dropped in by hand counts just as much as one we
 // fetched, and is listed so it can be seen and removed here.
-function listInstanceMods(instance) {
-  const folder = path.join(instanceFolder(instance), 'mods');
+function listInstanceContent(instance, kind = 'mod') {
+  const spec = CONTENT_KINDS[kind];
+  if (!spec) return [];
+
+  const folder = path.join(instanceFolder(instance), spec.folder);
   if (!fs.existsSync(folder)) return [];
 
   const recordPath = path.join(instanceFolder(instance), 'mods.json');
@@ -911,16 +955,19 @@ function listInstanceMods(instance) {
     known = [];
   }
 
-  return fs.readdirSync(folder)
-    .filter(name => /\.jar$/i.test(name))
-    .map(name => {
-      const record = known.find(entry => entry.filename === name);
+  // A texture pack may be a folder rather than a zip, and that is a perfectly
+  // ordinary way to have one.
+  return fs.readdirSync(folder, { withFileTypes: true })
+    .filter(entry => (kind === 'resourcepack' && entry.isDirectory()) ||
+                     new RegExp(`\\${spec.extension}$`, 'i').test(entry.name))
+    .map(entry => {
+      const record = known.find(item => item.filename === entry.name && (item.kind || 'mod') === kind);
       return {
-        filename: name,
-        title: record?.title || name.replace(/\.jar$/i, ''),
+        filename: entry.name,
+        title: record?.title || entry.name.replace(/\.(jar|zip)$/i, ''),
         source: record?.source || null,
         projectId: record?.projectId || null,
-        size: fs.statSync(path.join(folder, name)).size
+        kind
       };
     })
     .sort((a, b) => a.title.localeCompare(b.title));
@@ -943,17 +990,19 @@ function rememberMod(instance, entry) {
 // Installs a mod and everything it cannot run without. A mod that quietly
 // fails to load because a library is missing is the launcher's fault, not the
 // player's, so the dependencies come along without being asked about.
-async function installMod(instance, source, projectId, seen = new Set()) {
+async function installMod(instance, source, projectId, kind = 'mod', seen = new Set()) {
   if (seen.has(projectId)) return [];
   seen.add(projectId);
 
   const provider = modProviders[source];
   if (!provider) throw new Error(`unknown source: ${source}`);
 
-  const file = await provider.pickFile(projectId, instance);
+  const spec = CONTENT_KINDS[kind] || CONTENT_KINDS.mod;
+
+  const file = await provider.pickFile(projectId, instance, kind);
   if (!file) return [{ projectId, ok: false, reason: 'no-build' }];
 
-  const folder = path.join(instanceFolder(instance), 'mods');
+  const folder = path.join(instanceFolder(instance), spec.folder);
   fs.mkdirSync(folder, { recursive: true });
   const destination = path.join(folder, file.filename);
 
@@ -972,13 +1021,15 @@ async function installMod(instance, source, projectId, seen = new Set()) {
     title: file.title,
     source,
     projectId,
-    versionId: file.versionId
+    versionId: file.versionId,
+    kind
   });
 
   const installed = [{ projectId, ok: true, filename: file.filename, title: file.title }];
 
-  for (const dependency of file.requires) {
-    installed.push(...await installMod(instance, source, dependency, seen));
+  // A texture pack has nothing to bring with it; only mods do.
+  for (const dependency of kind === 'mod' ? file.requires : []) {
+    installed.push(...await installMod(instance, source, dependency, kind, seen));
   }
   return installed;
 }

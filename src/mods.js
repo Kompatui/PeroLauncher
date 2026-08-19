@@ -1,6 +1,10 @@
-document.getElementById('btn-back').addEventListener('click', () => {
-  window.location.href = 'index.html';
-});
+// One back arrow, and it goes back one step: from the catalogue to the pack,
+// from a pack to the list, and out to the main screen only from the top.
+// There used to be a second one inside the page, which meant two arrows on
+// screen doing two different things.
+let goBack = () => { window.location.href = 'index.html'; };
+
+document.getElementById('btn-back').addEventListener('click', () => goBack());
 
 document.getElementById('btn-min').addEventListener('click', () => window.api.minimize());
 document.getElementById('btn-max').addEventListener('click', () => window.api.maximize());
@@ -58,6 +62,7 @@ function countLabel(n) {
 // ---------------------------------------------------------------- pack list
 
 async function showPacks() {
+  goBack = () => { window.location.href = 'index.html'; };
   const store = await window.api.getInstances();
 
   const packs = store.instances.map(pack => `
@@ -120,6 +125,7 @@ async function showPacks() {
 // -------------------------------------------------------------- one pack
 
 async function openPack(id) {
+  goBack = showPacks;
   const store = await window.api.getInstances();
   const pack = store.instances.find(entry => entry.id === id);
   if (!pack) return showPacks();
@@ -150,7 +156,6 @@ async function openPack(id) {
 
   page.innerHTML = `
     <div class="pack-head">
-      <button class="link-btn" id="to-packs">${t('packs.backToList')}</button>
       <h2>${escapeHtml(pack.name)}</h2>
       <p class="packs-note">${escapeHtml(pack.version)} · ${escapeHtml(loaderLabel(pack))}</p>
     </div>
@@ -175,7 +180,6 @@ async function openPack(id) {
     </div>
   `;
 
-  document.getElementById('to-packs').addEventListener('click', showPacks);
   document.getElementById('open-folder').addEventListener('click', () => window.api.openInstanceFolder(id));
 
   document.getElementById('delete-pack').addEventListener('click', async () => {
@@ -257,6 +261,7 @@ function modCard(mod, alreadyIn) {
 // A page of its own rather than a dialog: a catalogue needs the whole window,
 // and a box in the middle of the screen was cutting the list in half.
 async function browseMods(pack, kind = 'mod') {
+  goBack = () => openPack(pack.id);
   if (!Object.keys(CATEGORIES).length) CATEGORIES = await window.api.getModCategories();
 
   const installed = await window.api.listInstanceMods(pack.id, kind);
@@ -280,7 +285,6 @@ async function browseMods(pack, kind = 'mod') {
     if (!support.ready) {
       page.innerHTML = `
         <div class="browse-head">
-          <button class="link-btn" id="to-pack">${t('packs.backToPack')}</button>
           <div class="browse-title"><h2>${t('packs.kindShaders')}</h2></div>
           <div class="kind-tabs">
             ${kinds.map(entry => `
@@ -292,10 +296,7 @@ async function browseMods(pack, kind = 'mod') {
         <div class="pack-actions">
           <button class="modal-btn" id="get-shader-loader">${t('packs.installShaderLoader')} ${escapeHtml(support.name)}</button>
         </div>
-      `;
-
-      document.getElementById('to-pack').addEventListener('click', () => openPack(pack.id));
-      page.querySelectorAll('.kind-tab').forEach(tab => {
+      `;      page.querySelectorAll('.kind-tab').forEach(tab => {
         tab.addEventListener('click', () => {
           if (tab.dataset.kind !== kind) browseMods(pack, tab.dataset.kind);
         });
@@ -317,7 +318,6 @@ async function browseMods(pack, kind = 'mod') {
 
   page.innerHTML = `
     <div class="browse-head">
-      <button class="link-btn" id="to-pack">${t('packs.backToPack')}</button>
       <div class="browse-title">
         <h2>${t('packs.addContent')}</h2>
         <span class="browse-for">${escapeHtml(pack.name)} · ${escapeHtml(pack.version)} · ${escapeHtml(loaderLabel(pack))}</span>
@@ -356,9 +356,6 @@ async function browseMods(pack, kind = 'mod') {
       </div>
     </div>
   `;
-
-  document.getElementById('to-pack').addEventListener('click', () => openPack(pack.id));
-
   page.querySelectorAll('.kind-tab').forEach(tab => {
     tab.addEventListener('click', () => {
       if (tab.dataset.kind !== kind) browseMods(pack, tab.dataset.kind);
@@ -505,11 +502,11 @@ async function installPack(run, label) {
 }
 
 async function browseModpacks() {
+  goBack = showPacks;
   if (!Object.keys(CATEGORIES).length) CATEGORIES = await window.api.getModCategories();
 
   page.innerHTML = `
     <div class="browse-head">
-      <button class="link-btn" id="to-packs">${t('packs.backToList')}</button>
       <div class="browse-title">
         <h2>${t('packs.findReady')}</h2>
         <span class="browse-for">${t('packs.readyExplain')}</span>
@@ -539,9 +536,6 @@ async function browseModpacks() {
       </div>
     </div>
   `;
-
-  document.getElementById('to-packs').addEventListener('click', showPacks);
-
   const field = document.getElementById('mod-search');
   const cards = document.getElementById('mod-cards');
   const more = document.getElementById('browse-more');

@@ -187,30 +187,46 @@ function shortNumber(value) {
   return String(value ?? 0);
 }
 
+// Every category Modrinth files a mod under, in the order it lists them.
+const CATEGORIES = [
+  'adventure', 'cursed', 'decoration', 'economy', 'equipment', 'food',
+  'game-mechanics', 'library', 'magic', 'management', 'minigame', 'mobs',
+  'optimization', 'social', 'storage', 'technology', 'transportation',
+  'utility', 'worldgen'
+];
+
+// A slug the launcher knows becomes a word; one it does not is shown as it
+// came, which is better than hiding a category we have never heard of.
+function categoryName(slug) {
+  const translated = t(`category.${slug}`);
+  return translated === `category.${slug}` ? slug : translated;
+}
+
 function modCard(mod, alreadyIn) {
   return `
     <article class="mod-card" data-id="${escapeHtml(mod.id)}" data-source="${escapeHtml(mod.source)}">
-      ${mod.icon
-        ? `<img class="mod-card-icon" src="${escapeHtml(mod.icon)}" alt="" loading="lazy">`
-        : '<span class="mod-card-icon empty"></span>'}
-
-      <div class="mod-card-body">
-        <h3 class="mod-card-title">
-          ${escapeHtml(mod.title)}
+      <header class="mod-card-head">
+        ${mod.icon
+          ? `<img class="mod-card-icon" src="${escapeHtml(mod.icon)}" alt="" loading="lazy">`
+          : '<span class="mod-card-icon empty"></span>'}
+        <div class="mod-card-naming">
+          <h3 class="mod-card-title">${escapeHtml(mod.title)}</h3>
           ${mod.author ? `<span class="mod-card-author">${t('packs.by')} ${escapeHtml(mod.author)}</span>` : ''}
-        </h3>
-        <p class="mod-card-desc">${escapeHtml(mod.description)}</p>
-        <div class="mod-card-tags">
-          ${mod.categories.map(category => `<span class="mod-tag">${escapeHtml(category)}</span>`).join('')}
         </div>
+      </header>
+
+      <p class="mod-card-desc">${escapeHtml(mod.description)}</p>
+
+      <div class="mod-card-tags">
+        ${mod.categories.map(category => `<span class="mod-tag">${escapeHtml(categoryName(category))}</span>`).join('')}
       </div>
 
-      <div class="mod-card-side">
+      <footer class="mod-card-foot">
         <span class="mod-card-stat"><b>${shortNumber(mod.downloads)}</b> ${t('packs.downloads')}</span>
         <button class="mod-install${alreadyIn ? ' done' : ''}" ${alreadyIn ? 'disabled' : ''}>
           ${alreadyIn ? t('packs.alreadyIn') : t('packs.install')}
         </button>
-      </div>
+      </footer>
     </article>
   `;
 }
@@ -232,8 +248,27 @@ async function browseMods(pack) {
       <p class="browse-hint">${t('packs.searchHint')}</p>
     </div>
 
-    <div class="mod-cards" id="mod-cards"><p class="modal-note">${t('packs.searching')}</p></div>
-    <div class="browse-more" id="browse-more"></div>
+    <div class="browse-body">
+      <aside class="browse-filters">
+        <div class="filters-head">
+          <span class="filters-title">${t('packs.categories')}</span>
+          <button class="link-btn hidden" id="clear-categories">${t('packs.clearCategories')}</button>
+        </div>
+        <div class="category-list">
+          ${CATEGORIES.map(slug => `
+            <label class="category-row">
+              <input type="checkbox" value="${escapeHtml(slug)}">
+              <span>${escapeHtml(categoryName(slug))}</span>
+            </label>
+          `).join('')}
+        </div>
+      </aside>
+
+      <div class="browse-results">
+        <div class="mod-cards" id="mod-cards"><p class="modal-note">${t('packs.searching')}</p></div>
+        <div class="browse-more" id="browse-more"></div>
+      </div>
+    </div>
   `;
 
   document.getElementById('to-pack').addEventListener('click', () => openPack(pack.id));
@@ -241,10 +276,27 @@ async function browseMods(pack) {
   const field = document.getElementById('mod-search');
   const cards = document.getElementById('mod-cards');
   const more = document.getElementById('browse-more');
+  const clear = document.getElementById('clear-categories');
 
   let round = 0;
   let shown = 0;
   let query = '';
+  let chosen = [];
+
+  function readCategories() {
+    chosen = [...page.querySelectorAll('.category-row input:checked')].map(box => box.value);
+    clear.classList.toggle('hidden', chosen.length === 0);
+    load(0);
+  }
+
+  page.querySelectorAll('.category-row input').forEach(box => {
+    box.addEventListener('change', readCategories);
+  });
+
+  clear.addEventListener('click', () => {
+    page.querySelectorAll('.category-row input').forEach(box => { box.checked = false; });
+    readCategories();
+  });
 
   function wire(scope) {
     scope.querySelectorAll('.mod-card').forEach(card => {
@@ -278,7 +330,7 @@ async function browseMods(pack) {
     if (!offset) cards.innerHTML = `<p class="modal-note">${t('packs.searching')}</p>`;
     more.innerHTML = '';
 
-    const data = await window.api.searchMods(pack.id, query, offset);
+    const data = await window.api.searchMods(pack.id, query, offset, chosen);
     if (mine !== round) return;
 
     if (data.error) {

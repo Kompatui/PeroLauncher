@@ -573,12 +573,12 @@ ipcMain.handle('remove-instance-mod', (event, id, filename) => {
   return { ok: true };
 });
 
-ipcMain.handle('search-mods', async (event, id, query, offset) => {
+ipcMain.handle('search-mods', async (event, id, query, offset, categories) => {
   const instance = loadInstances().instances.find(entry => entry.id === id);
   if (!instance) return { error: 'no-instance' };
 
   try {
-    return await modProviders.modrinth.search(query, instance, offset || 0);
+    return await modProviders.modrinth.search(query, instance, offset || 0, categories || []);
   } catch (e) {
     return { error: e.message };
   }
@@ -824,10 +824,17 @@ const modProviders = {
     id: 'modrinth',
     name: 'Modrinth',
 
-    async search(query, instance, offset = 0) {
+    async search(query, instance, offset = 0, categories = []) {
       const facets = [['project_type:mod'], [`versions:${instance.version}`]];
       if (instance.loader && instance.loader !== 'vanilla') {
         facets.push(loaderTags(instance.loader).map(tag => `categories:${tag}`));
+      }
+
+      // Each chosen category is its own group, which narrows rather than
+      // widens: asking for magic and storage means both, as it does on the
+      // site people are used to.
+      for (const category of categories) {
+        facets.push([`categories:${category}`]);
       }
 
       const url = `${MODRINTH}/search?limit=20&offset=${offset}` +

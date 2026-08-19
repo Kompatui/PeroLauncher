@@ -251,16 +251,107 @@
   color: #999;
 }
 
-.mod-cards {
+/* The categories beside the results, as a catalogue does it. */
+.browse-body {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  gap: 22px;
+  align-items: start;
+}
+
+.filters-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.filters-title {
+  font-size: 13px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #888;
+}
+
+.filters-head .link-btn {
+  padding: 0;
+  font-size: 12px;
+}
+
+.filters-head .link-btn.hidden {
+  display: none;
+}
+
+.category-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 1px;
+}
+
+.category-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 7px;
+  border-radius: 5px;
+  font-size: 14px;
+  cursor: pointer;
+  color: #444;
+}
+
+.category-row:hover {
+  background: #f0f0f0;
+}
+
+.category-row input {
+  accent-color: #00af5c;
+  cursor: pointer;
+  margin: 0;
+}
+
+/* Three across at most, however wide the window gets - a card stretched over
+   half a monitor stops looking like a card. */
+.mod-cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+@media (min-width: 780px) {
+  .mod-cards { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (min-width: 1180px) {
+  .mod-cards { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* Below this the categories sit above the results instead of stealing a
+   third of the width from them. */
+@media (max-width: 700px) {
+  .browse-body {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .category-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .category-row {
+    background: #f4f4f4;
+    padding: 5px 10px;
+    border-radius: 20px;
+  }
 }
 
 .mod-card {
   display: flex;
-  align-items: flex-start;
-  gap: 16px;
+  flex-direction: column;
+  gap: 10px;
   padding: 16px;
   background: #fff;
   border: 1px solid #e7e7e7;
@@ -273,9 +364,16 @@
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
 }
 
+.mod-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
 .mod-card-icon {
-  width: 68px;
-  height: 68px;
+  width: 52px;
+  height: 52px;
   border-radius: 10px;
   object-fit: cover;
   flex-shrink: 0;
@@ -286,37 +384,41 @@
   display: inline-block;
 }
 
-.mod-card-body {
-  flex: 1;
+.mod-card-naming {
   min-width: 0;
 }
 
+/* One line each: in a grid every card is the same width, and a long name that
+   wraps would make its card taller than the ones beside it. */
 .mod-card-title {
-  margin: 0 0 4px;
-  font-size: 17px;
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 7px;
+  margin: 0;
+  font-size: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mod-card-author {
-  font-size: 13px;
-  font-weight: normal;
+  display: block;
+  font-size: 12px;
   color: #888;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Two lines and no more, so a wordy description cannot push the next card off
-   the screen. */
+/* Two lines and no more, so a wordy description cannot make one card in a row
+   twice the height of its neighbours. */
 .mod-card-desc {
-  margin: 0 0 10px;
-  font-size: 14px;
+  margin: 0;
+  font-size: 13px;
   line-height: 1.45;
   color: #555;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  min-height: 38px;
 }
 
 .mod-card-tags {
@@ -333,12 +435,15 @@
   padding: 3px 9px;
 }
 
-.mod-card-side {
+/* Pinned to the bottom so the buttons line up across a row even when the
+   cards above them do not hold the same amount of text. */
+.mod-card-foot {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
+  align-items: center;
+  justify-content: space-between;
   gap: 10px;
-  flex-shrink: 0;
+  margin-top: auto;
+  padding-top: 4px;
 }
 
 .mod-card-stat {
@@ -402,17 +507,3 @@
   background: #f5f5f5;
 }
 
-/* On a narrow window the stats and the button move under the description
-   instead of squeezing it out. */
-@media (max-width: 620px) {
-  .mod-card {
-    flex-wrap: wrap;
-  }
-
-  .mod-card-side {
-    flex-direction: row;
-    align-items: center;
-    width: 100%;
-    justify-content: space-between;
-  }
-}

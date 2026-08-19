@@ -138,5 +138,11 @@
   "packs.installed": "Готово",
   "packs.installFailed": "Не вышло",
   "loader.loading": "Загружаю список сборок загрузчика…",
-  "loader.none": "Для этой версии сборок загрузчика не нашлось"
+  "loader.none": "Для этой версии сборок загрузчика не нашлось",
+  "packs.by": "от",
+  "packs.downloads": "загрузок",
+  "packs.alreadyIn": "Уже стоит",
+  "packs.showMore": "Показать ещё",
+  "packs.backToPack": "← к сборке",
+  "packs.searchHint": "Показаны только моды, подходящие этой версии и загрузчику"
 }

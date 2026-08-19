@@ -138,5 +138,11 @@
   "packs.installed": "Done",
   "packs.installFailed": "Did not work",
   "loader.loading": "Loading the loader builds…",
-  "loader.none": "No loader builds were found for this version"
+  "loader.none": "No loader builds were found for this version",
+  "packs.by": "by",
+  "packs.downloads": "downloads",
+  "packs.alreadyIn": "Installed",
+  "packs.showMore": "Show more",
+  "packs.backToPack": "← back to the pack",
+  "packs.searchHint": "Only mods that fit this version and loader are listed"
 }

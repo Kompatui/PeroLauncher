@@ -166,7 +166,7 @@ async function openPack(id) {
   }
 
   if (canHaveMods) {
-    document.getElementById('add-mods').addEventListener('click', () => searchMods(pack));
+    document.getElementById('add-mods').addEventListener('click', () => browseMods(pack));
   }
 
   page.querySelectorAll('.mod-remove').forEach(button => {
@@ -180,71 +180,92 @@ async function openPack(id) {
 
 // ------------------------------------------------------------ mod search
 
-async function searchMods(pack) {
-  modalBox.innerHTML = `
-    <h3>${t('packs.addMods')}</h3>
-    <p class="modal-note">${escapeHtml(pack.version)} · ${escapeHtml(loaderLabel(pack))}</p>
-    <input type="text" id="mod-search" class="modal-search" placeholder="${t('packs.searchPlaceholder')}">
-    <div class="mod-results" id="mod-results"><p class="modal-note">${t('packs.searching')}</p></div>
-    <div class="modal-buttons">
-      <button class="modal-btn-cancel" id="modal-cancel">${t('modal.close')}</button>
-    </div>
-  `;
-  overlay.classList.remove('hidden');
+// Numbers the way a catalogue writes them: nobody reads 4831207.
+function shortNumber(value) {
+  if (value >= 1000000) return `${(value / 1000000).toFixed(1).replace(/\.0$/, '')}M`;
+  if (value >= 1000) return `${(value / 1000).toFixed(1).replace(/\.0$/, '')}K`;
+  return String(value ?? 0);
+}
 
-  document.getElementById('modal-cancel').addEventListener('click', () => {
-    closeModal();
-    openPack(pack.id);   // Whatever was installed should be on screen.
-  });
+function modCard(mod, alreadyIn) {
+  return `
+    <article class="mod-card" data-id="${escapeHtml(mod.id)}" data-source="${escapeHtml(mod.source)}">
+      ${mod.icon
+        ? `<img class="mod-card-icon" src="${escapeHtml(mod.icon)}" alt="" loading="lazy">`
+        : '<span class="mod-card-icon empty"></span>'}
+
+      <div class="mod-card-body">
+        <h3 class="mod-card-title">
+          ${escapeHtml(mod.title)}
+          ${mod.author ? `<span class="mod-card-author">${t('packs.by')} ${escapeHtml(mod.author)}</span>` : ''}
+        </h3>
+        <p class="mod-card-desc">${escapeHtml(mod.description)}</p>
+        <div class="mod-card-tags">
+          ${mod.categories.map(category => `<span class="mod-tag">${escapeHtml(category)}</span>`).join('')}
+        </div>
+      </div>
+
+      <div class="mod-card-side">
+        <span class="mod-card-stat"><b>${shortNumber(mod.downloads)}</b> ${t('packs.downloads')}</span>
+        <button class="mod-install${alreadyIn ? ' done' : ''}" ${alreadyIn ? 'disabled' : ''}>
+          ${alreadyIn ? t('packs.alreadyIn') : t('packs.install')}
+        </button>
+      </div>
+    </article>
+  `;
+}
+
+// A page of its own rather than a dialog: a catalogue needs the whole window,
+// and a box in the middle of the screen was cutting the list in half.
+async function browseMods(pack) {
+  const installed = await window.api.listInstanceMods(pack.id);
+  const have = new Set(installed.map(mod => mod.projectId).filter(Boolean));
+
+  page.innerHTML = `
+    <div class="browse-head">
+      <button class="link-btn" id="to-pack">${t('packs.backToPack')}</button>
+      <div class="browse-title">
+        <h2>${t('packs.addMods')}</h2>
+        <span class="browse-for">${escapeHtml(pack.name)} · ${escapeHtml(pack.version)} · ${escapeHtml(loaderLabel(pack))}</span>
+      </div>
+      <input type="text" id="mod-search" class="browse-search" placeholder="${t('packs.searchPlaceholder')}">
+      <p class="browse-hint">${t('packs.searchHint')}</p>
+    </div>
+
+    <div class="mod-cards" id="mod-cards"><p class="modal-note">${t('packs.searching')}</p></div>
+    <div class="browse-more" id="browse-more"></div>
+  `;
+
+  document.getElementById('to-pack').addEventListener('click', () => openPack(pack.id));
 
   const field = document.getElementById('mod-search');
-  const results = document.getElementById('mod-results');
+  const cards = document.getElementById('mod-cards');
+  const more = document.getElementById('browse-more');
 
   let round = 0;
+  let shown = 0;
+  let query = '';
 
-  async function run(query) {
-    const mine = ++round;
-    results.innerHTML = `<p class="modal-note">${t('packs.searching')}</p>`;
+  function wire(scope) {
+    scope.querySelectorAll('.mod-card').forEach(card => {
+      const button = card.querySelector('.mod-install');
+      if (button.disabled) return;
 
-    const data = await window.api.searchMods(pack.id, query, 0);
-    if (mine !== round || overlay.classList.contains('hidden')) return;
-
-    if (data.error) {
-      results.innerHTML = `<p class="modal-note warn">${t('packs.searchFailed')}</p>`;
-      return;
-    }
-
-    if (!data.mods.length) {
-      results.innerHTML = `<p class="modal-note">${t('packs.nothingFound')}</p>`;
-      return;
-    }
-
-    results.innerHTML = data.mods.map(mod => `
-      <div class="mod-hit" data-id="${escapeHtml(mod.id)}" data-source="${escapeHtml(mod.source)}">
-        ${mod.icon ? `<img class="mod-icon" src="${escapeHtml(mod.icon)}" alt="">` : '<span class="mod-icon empty"></span>'}
-        <span class="mod-hit-main">
-          <span class="mod-title">${escapeHtml(mod.title)}</span>
-          <span class="mod-desc">${escapeHtml(mod.description)}</span>
-        </span>
-        <button class="mod-install">${t('packs.install')}</button>
-      </div>
-    `).join('');
-
-    results.querySelectorAll('.mod-hit').forEach(hit => {
-      const button = hit.querySelector('.mod-install');
       button.addEventListener('click', async () => {
         button.disabled = true;
         button.textContent = t('packs.installing');
 
-        const result = await window.api.installMod(pack.id, hit.dataset.source, hit.dataset.id);
+        const result = await window.api.installMod(pack.id, card.dataset.source, card.dataset.id);
 
         if (!result.ok) {
           button.textContent = t('packs.installFailed');
+          button.classList.add('failed');
           return;
         }
 
         // Dependencies come along uninvited, so say how many actually landed.
         const extra = result.installed.filter(entry => entry.ok).length - 1;
+        button.classList.add('done');
         button.textContent = extra > 0
           ? `${t('packs.installed')} +${extra}`
           : t('packs.installed');
@@ -252,14 +273,45 @@ async function searchMods(pack) {
     });
   }
 
+  async function load(offset) {
+    const mine = ++round;
+    if (!offset) cards.innerHTML = `<p class="modal-note">${t('packs.searching')}</p>`;
+    more.innerHTML = '';
+
+    const data = await window.api.searchMods(pack.id, query, offset);
+    if (mine !== round) return;
+
+    if (data.error) {
+      cards.innerHTML = `<p class="modal-note warn">${t('packs.searchFailed')}</p>`;
+      return;
+    }
+
+    if (!data.mods.length && !offset) {
+      cards.innerHTML = `<p class="modal-note">${t('packs.nothingFound')}</p>`;
+      return;
+    }
+
+    const html = data.mods.map(mod => modCard(mod, have.has(mod.id))).join('');
+    if (offset) cards.insertAdjacentHTML('beforeend', html);
+    else cards.innerHTML = html;
+
+    shown = offset + data.mods.length;
+    wire(cards);
+
+    if (shown < data.total) {
+      more.innerHTML = `<button class="modal-btn" id="load-more">${t('packs.showMore')}</button>`;
+      document.getElementById('load-more').addEventListener('click', () => load(shown));
+    }
+  }
+
   let typingTimer = null;
   field.addEventListener('input', () => {
     clearTimeout(typingTimer);
-    typingTimer = setTimeout(() => run(field.value.trim()), 350);
+    typingTimer = setTimeout(() => { query = field.value.trim(); load(0); }, 350);
   });
 
   field.focus();
-  run('');
+  load(0);
 }
 
 // ------------------------------------------------------------ making one

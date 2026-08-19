@@ -846,6 +846,12 @@ const modProviders = {
           description: hit.description,
           author: hit.author,
           downloads: hit.downloads,
+          follows: hit.follows,
+          // The loaders are in here too and would only repeat what the pack
+          // already is, so they are dropped and the subject matter kept.
+          categories: (hit.display_categories || hit.categories || [])
+            .filter(category => !['fabric', 'forge', 'quilt', 'neoforge'].includes(category))
+            .slice(0, 4),
           icon: hit.icon_url || null
         }))
       };

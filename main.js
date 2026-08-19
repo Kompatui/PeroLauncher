@@ -243,6 +243,12 @@ ipcMain.handle('launch-game', async (event, profile) => {
         opts.version.custom = profileId;
       } else {
         opts.forge = await loader.ensureInstaller(settings.version, settings.loaderVersion);
+
+        // Only the universal-jar era, 1.6 to 1.11. From 1.12 the installer
+        // route brings its own libraries and needs no help.
+        if (forgeArtifactKind(settings.version) === 'universal') {
+          await ensureForgeLibraries(settings.gameFolder, opts.forge);
+        }
       }
     } catch (e) {
       if (e.message === 'needs-modloader') {
@@ -1020,6 +1026,60 @@ async function installLegacyProfile(mcVersion, gameFolder, profileId, loaderArch
   // inside the patched jar, so nothing else has to be declared.
   fs.writeFileSync(jsonPath, JSON.stringify({ ...meta, id: profileId }, null, 2));
   return profileId;
+}
+
+// Where a Forge library can be found. Its own address first, then the three
+// hosts that between them still carry everything that era needs - argo and
+// lzma survive only at Mojang, guava is everywhere, Forge's own maven has the
+// rest.
+const FORGE_LIBRARY_SOURCES = [
+  'https://maven.minecraftforge.net/',
+  'https://libraries.minecraft.net/',
+  'https://repo1.maven.org/maven2/'
+];
+
+// minecraft-launcher-core writes some of these into the class path without
+// ever downloading them: 1.6.4 asked for guava 14.0, put it on the command
+// line, and left the file absent, so FML died on a missing class before the
+// game window appeared. Fetching them ourselves makes that moot.
+async function ensureForgeLibraries(gameFolder, forgeJarPath) {
+  const entry = new AdmZip(forgeJarPath).getEntry('version.json');
+  if (!entry) return;
+
+  let json;
+  try {
+    json = JSON.parse(entry.getData().toString('utf-8'));
+  } catch {
+    return;
+  }
+
+  for (const library of json.libraries || []) {
+    // Native libraries are unpacked by MCLC from its own copies.
+    if (library.natives) continue;
+
+    const [group, artifact, version] = library.name.split(':');
+    // Forge itself is handed over as the jar, not fetched from a repository.
+    if (group === 'net.minecraftforge') continue;
+
+    const relative = `${group.replace(/\./g, '/')}/${artifact}/${version}/${artifact}-${version}.jar`;
+    const destination = path.join(gameFolder, 'libraries', relative);
+    if (fs.existsSync(destination)) continue;
+
+    const sources = library.url
+      ? [library.url, ...FORGE_LIBRARY_SOURCES]
+      : FORGE_LIBRARY_SOURCES;
+
+    for (const base of sources) {
+      try {
+        const data = await fetchBuffer(base + relative);
+        fs.mkdirSync(path.dirname(destination), { recursive: true });
+        fs.writeFileSync(destination, data);
+        break;
+      } catch {
+        // Try the next host; a missing file here is not fatal on its own.
+      }
+    }
+  }
 }
 
 // True when something in the jar calls ModLoader but nothing provides it.

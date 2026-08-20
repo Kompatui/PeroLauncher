@@ -42,9 +42,10 @@ const defaultSettings = {
   language: 'ru',
   javaPath: null,
   javaArgs: '',
-  // What the launcher does with itself once the game is up: get out of the
-  // way, stay put, or quit. Minimising is what a launcher is expected to do.
-  onGameStart: 'minimize',
+  // What the launcher does with itself once the game is up: stay on screen,
+  // get out of the way until the game is over, or leave for good. Getting out
+  // of the way is what a launcher is expected to do.
+  onGameStart: 'hide',
   // The character on the white tile, drawn in three dimensions. It is the one
   // thing here that costs anything to have on screen - the graphics card is no
   // help on a machine where it has to be switched off - so it can be turned
@@ -71,11 +72,21 @@ function loadSettings() {
   }
   const raw = fs.readFileSync(settingsPath, 'utf-8');
   const parsed = JSON.parse(raw);
-  return {
+  const settings = {
     ...defaultSettings,
     ...parsed,
     versionFilters: { ...defaultSettings.versionFilters, ...(parsed.versionFilters || {}) }
   };
+
+  // Both of the old answers become the one that works. Minimising left the
+  // launcher sitting in the taskbar for no reason, and closing quit the
+  // application outright, which killed the game a second and a half after it
+  // started - measured, not guessed.
+  if (settings.onGameStart === 'minimize' || settings.onGameStart === 'close') {
+    settings.onGameStart = 'hide';
+  }
+
+  return settings;
 }
 
 function saveSettingsToDisk(settings) {
@@ -1082,8 +1093,14 @@ async function startGame(profile, ramOverride) {
       steppedAside = true;
       say('running');
 
-      if (settings.onGameStart === 'minimize') launcherWindow.minimize();
-      else if (settings.onGameStart === 'close') app.quit();
+      // Off the screen and out of the taskbar - and for both of these, not
+      // gone: quitting would kill the game. Everything the launcher starts is
+      // its own family as far as Windows is concerned, and the family goes
+      // down together; measured, a game died a second and a half after the
+      // launcher did. So what is left behind draws nothing, costs nothing,
+      // and is there to catch the game's last words. Where the two differ is
+      // afterwards: one comes back, the other leaves for good.
+      if (settings.onGameStart !== 'keep') launcherWindow.hide();
       return;
     }
 
@@ -1094,10 +1111,10 @@ async function startGame(profile, ramOverride) {
     if (activeLaunch === launch) activeLaunch = null;
     worker.kill();
 
-    // Back where it was. A crash is exactly when the launcher is wanted
-    // again, so this happens before the report below.
-    if (settings.onGameStart === 'minimize' && launcherWindow && !launcherWindow.isDestroyed()) {
-      launcherWindow.restore();
+    // Back on screen. A crash is exactly when the launcher is wanted again,
+    // so this happens before the report below.
+    if (launcherWindow && !launcherWindow.isDestroyed() && settings.onGameStart !== 'keep') {
+      launcherWindow.show();
       launcherWindow.focus();
     }
 

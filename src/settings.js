@@ -80,7 +80,7 @@ function renderTranslatedValues() {
   document.getElementById('current-java').textContent =
     settings.javaPath || t('settings.javaAuto');
   document.getElementById('current-ongamestart').textContent =
-    t(ON_GAME_START_LABELS[settings.onGameStart] || 'onGameStart.minimize');
+    t(ON_GAME_START_LABELS[settings.onGameStart] || 'onGameStart.hide');
   document.getElementById('current-javaargs').textContent =
     settings.javaArgs || t('javaArgs.none');
   renderLoaderBadge();
@@ -690,10 +690,12 @@ document.getElementById('item-jarmods').addEventListener('click', () => {
   });
 });
 
+// Two, because there are only two the launcher can honestly do. Leaving for
+// good is not among them: everything the launcher starts is its own family as
+// far as Windows is concerned, so quitting would take the game with it.
 const ON_GAME_START_LABELS = {
-  minimize: 'onGameStart.minimize',
   keep: 'onGameStart.keep',
-  close: 'onGameStart.close'
+  hide: 'onGameStart.hide'
 };
 
 document.getElementById('item-ongamestart').addEventListener('click', () => {

@@ -592,7 +592,7 @@ async function installPack(run, label) {
 // move to - their world, their server or their friends are still on the old
 // one. Every published build is listed, newest first, with the game version it
 // is for.
-async function choosePackBuild(projectId, title) {
+async function choosePackBuild(projectId, title, wanted = '') {
   modalBox.innerHTML = `
     <h3>${escapeHtml(title || '')}</h3>
     <p class="modal-note">${t('packs.pickBuildLoading')}</p>
@@ -618,14 +618,22 @@ async function choosePackBuild(projectId, title) {
     return;
   }
 
-  const rows = result.builds.map((build, index) => {
+  // Whatever the catalogue was being filtered by is what this person is
+  // playing, so that is the one marked - and the list is scrolled to it. With
+  // no filter, the newest is marked instead.
+  const marked = result.builds.find(build => build.gameVersion === wanted)
+    || result.builds.find(build => build.newest)
+    || result.builds[0];
+
+  const rows = result.builds.map(build => {
     const versions = build.gameVersion || t('packs.buildAnyVersion');
     const loaders = build.loaders.map(name => LOADER_NAMES[name] || name).join(', ');
-    // The first one is the newest, and said so rather than merely being first.
-    const meta = [loaders, build.number, index === 0 ? t('packs.buildNewest') : '']
+    // Said out loud rather than left to be guessed from the order: the newest
+    // build is not always the one for the newest version of the game.
+    const meta = [loaders, build.number, build.newest ? t('packs.buildNewest') : '']
       .filter(Boolean).join(' · ');
     return `
-      <div class="modal-lang-option${index === 0 ? ' current' : ''}" data-build="${escapeHtml(build.id)}">
+      <div class="modal-lang-option${build === marked ? ' current' : ''}" data-build="${escapeHtml(build.id)}">
         <span class="build-version">${escapeHtml(versions)}</span>
         <span class="build-meta">${escapeHtml(meta)}</span>
       </div>
@@ -639,6 +647,8 @@ async function choosePackBuild(projectId, title) {
     ${closeButtonHtml()}
   `;
   wireCloseButton();
+
+  modalBox.querySelector('.modal-lang-option.current')?.scrollIntoView({ block: 'center' });
 
   modalBox.querySelectorAll('.modal-lang-option').forEach(option => {
     option.addEventListener('click', () => {
@@ -750,7 +760,8 @@ async function browseModpacks() {
       button.textContent = t('packs.installPack');
       button.addEventListener('click', () => choosePackBuild(
         card.dataset.id,
-        card.querySelector('.mod-card-title')?.textContent.trim()
+        card.querySelector('.mod-card-title')?.textContent.trim(),
+        gameVersion
       ));
     });
 

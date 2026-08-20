@@ -1236,24 +1236,48 @@ async function modrinthCategories() {
   }
 }
 
-// The versions of the game the catalogue itself knows about, so the filter
-// offers exactly what a search can be narrowed by - names taken from anywhere
-// else would only agree with these by luck. Releases only: nobody looks for a
-// pack for a snapshot, and there are hundreds of them.
-async function modrinthGameVersions() {
-  try {
-    const tags = await fetchJson(`${MODRINTH}/tag/game_version`, { headers: MOD_API_HEADERS });
-    const releases = tags.filter(tag => tag.version_type === 'release').map(tag => tag.version);
-    fs.writeFileSync(gameVersionsCachePath, JSON.stringify(releases));
-    return releases;
-  } catch {
-    // Without them the filter is not shown; the catalogue itself still works.
+// Every version of the game the catalogue knows, newest first - 907 of them,
+// snapshots and all. Two things are taken from this list: what the filter
+// offers, and what counts as newer than what.
+//
+// The order matters more than it looks. Version names cannot be sorted: "26.2"
+// against "1.21.11" is not a comparison any rule of arithmetic settles, and
+// the numbering has changed shape twice in the game's life. This list is the
+// answer, straight from the catalogue, and it is kept rather than worked out.
+async function modrinthVersionTags() {
+  const fromCache = () => {
     try {
-      return JSON.parse(fs.readFileSync(gameVersionsCachePath, 'utf-8'));
+      const saved = JSON.parse(fs.readFileSync(gameVersionsCachePath, 'utf-8'));
+      // An older cache held bare names, all of them releases.
+      return saved.map(entry => (typeof entry === 'string' ? { version: entry, type: 'release' } : entry));
     } catch {
       return [];
     }
+  };
+
+  try {
+    const tags = await fetchJson(`${MODRINTH}/tag/game_version`, { headers: MOD_API_HEADERS });
+    const slim = tags.map(tag => ({ version: tag.version, type: tag.version_type }));
+    fs.writeFileSync(gameVersionsCachePath, JSON.stringify(slim));
+    return slim;
+  } catch {
+    // Without them the filter is not shown; the catalogue itself still works.
+    return fromCache();
   }
+}
+
+// Releases only for the filter: nobody goes looking for a pack for a snapshot,
+// and there are eight hundred of those.
+async function modrinthGameVersions() {
+  return (await modrinthVersionTags()).filter(tag => tag.type === 'release').map(tag => tag.version);
+}
+
+// How new a version is, as a place in that list: 0 is the newest there is.
+// Anything the list has never heard of goes to the end rather than to the top.
+function versionRanking(tags) {
+  const places = new Map();
+  tags.forEach((tag, index) => places.set(tag.version, index));
+  return version => (places.has(version) ? places.get(version) : Number.MAX_SAFE_INTEGER);
 }
 
 const modProviders = {
@@ -1495,17 +1519,18 @@ async function modpackBuilds(projectId) {
   if (!Array.isArray(builds)) return [];
 
   // One line per version of the game, not per build. A pack that has been
-  // going for years has hundreds of builds - Fabulously Optimized had 463 -
+  // going for years has hundreds of builds - Fabulously Optimized has 463 -
   // and a list of those is not a choice anyone can make. What is being chosen
   // here is the version of Minecraft; for each one, the newest build that was
   // made for it, which is the one that pack's author would hand over.
+  const usable = builds.filter(build => (build.files || []).length);
   const newestFor = new Map();
 
-  for (const build of builds) {
-    if (!(build.files || []).length) continue;
-
+  for (const build of usable) {
     for (const gameVersion of build.game_versions || []) {
-      if (newestFor.has(gameVersion)) continue;
+      const kept = newestFor.get(gameVersion);
+      if (kept && String(kept.published) >= String(build.date_published)) continue;
+
       newestFor.set(gameVersion, {
         id: build.id,
         gameVersion,
@@ -1516,8 +1541,20 @@ async function modpackBuilds(projectId) {
     }
   }
 
-  // Newest build first, which puts the newest game version at the top.
-  return [...newestFor.values()].sort((a, b) => String(b.published).localeCompare(String(a.published)));
+  // The one build that came out last, whatever it was made for. Worth saying
+  // out loud, because it is not always the one for the newest game version.
+  const latest = usable.reduce(
+    (newest, build) => (!newest || build.date_published > newest.date_published ? build : newest), null);
+
+  // In order of the game's own versions, newest first. Sorting these by the
+  // date their builds came out is what made the list nonsense before: a pack
+  // patched for 1.21.1 last week landed above one built for 26.1 last month.
+  const rankOf = versionRanking(await modrinthVersionTags());
+
+  return [...newestFor.values()]
+    .map(entry => ({ ...entry, newest: latest ? entry.id === latest.id : false }))
+    .sort((a, b) => rankOf(a.gameVersion) - rankOf(b.gameVersion)
+      || String(a.gameVersion).localeCompare(String(b.gameVersion)));
 }
 
 async function installModpack(projectId, buildId = null, report = () => {}) {

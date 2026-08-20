@@ -590,8 +590,11 @@ async function installPack(run, label) {
 // Which build of the pack to take. It used to take the newest without asking,
 // and the newest is often for a version of the game somebody is not ready to
 // move to - their world, their server or their friends are still on the old
-// one. Every published build is listed, newest first, with the game version it
-// is for.
+// one.
+//
+// The question is only worth asking when it has not already been answered.
+// Choosing a version in the filter is choosing a version, and being asked
+// again straight afterwards is being asked to repeat oneself.
 async function choosePackBuild(projectId, title, wanted = '') {
   modalBox.innerHTML = `
     <h3>${escapeHtml(title || '')}</h3>
@@ -611,19 +614,20 @@ async function choosePackBuild(projectId, title, wanted = '') {
     return;
   }
 
-  // Only one build to be had: asking would be a question with one answer.
-  if (result.builds.length === 1) {
+  // Already answered in the filter, or only one build to be had. Either way
+  // there is nothing left to ask, so it is installed and that is that.
+  const asked = wanted ? result.builds.find(build => build.gameVersion === wanted) : null;
+  const only = result.builds.length === 1 ? result.builds[0] : null;
+
+  if (asked || only) {
     closeModal();
-    installPack(() => window.api.installModpack(projectId, result.builds[0].id), title);
+    installPack(() => window.api.installModpack(projectId, (asked || only).id), title);
     return;
   }
 
-  // Whatever the catalogue was being filtered by is what this person is
-  // playing, so that is the one marked - and the list is scrolled to it. With
-  // no filter, the newest is marked instead.
-  const marked = result.builds.find(build => build.gameVersion === wanted)
-    || result.builds.find(build => build.newest)
-    || result.builds[0];
+  // No filter, so the choice is made here. The newest build is marked and the
+  // list is opened at it.
+  const marked = result.builds.find(build => build.newest) || result.builds[0];
 
   const rows = result.builds.map(build => {
     const versions = build.gameVersion || t('packs.buildAnyVersion');

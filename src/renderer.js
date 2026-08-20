@@ -9,6 +9,18 @@ const launchText = document.getElementById('launch-text');
 const launchFill = document.getElementById('launch-fill');
 const launchCross = document.getElementById('launch-cross');
 
+// The Esc key, drawn the way the Enter key is drawn on the play tile. Until
+// that picture exists the plain cross takes its place - an empty tile in the
+// middle of a launch would look like something had gone wrong.
+const launchEsc = document.getElementById('launch-esc');
+function useCrossInstead() {
+  launchEsc.classList.add('hidden');
+  document.getElementById('launch-cross-fallback').classList.remove('hidden');
+}
+launchEsc.addEventListener('error', useCrossInstead);
+// A picture that is already missing by the time this runs never fires 'error'.
+if (launchEsc.complete && launchEsc.naturalWidth === 0) useCrossInstead();
+
 // Starting and stopping are two different things, so they are two different
 // controls. One tile that changed colour and meaning was where every one of
 // these bugs came from: whether a press started a game or stopped one
@@ -39,14 +51,40 @@ function hidePanel() {
   playTile.classList.remove('hidden');
 }
 
-// The whole panel is the button. Nothing here starts anything: it can only
-// ever call off what is already running.
-launchPanel.addEventListener('click', (event) => {
-  event.stopPropagation();
-  if (launchPanel.disabled) return;
+// Which launch is on screen, and which one the player has called off. A launch
+// does not reach the main process the moment it is asked for: a stale
+// Microsoft sign-in has to be refreshed first, and that takes seconds. Called
+// off during those seconds, there was nothing over there to stop - the refusal
+// was answered with silence and the game started anyway.
+let attempt = 0;
+let cancelledAttempt = 0;
+let handedOver = false;
+
+// Nothing here starts anything: it can only ever call off what is already
+// running.
+function cancelLaunch() {
+  if (launchPanel.disabled || launchPanel.classList.contains('hidden')) return;
+
+  cancelledAttempt = attempt;
+
+  // Still ours. No report will come back from a launch that was never handed
+  // over, so the screen clears itself rather than waiting for one.
+  if (!handedOver) {
+    hidePanel();
+    return;
+  }
 
   showPanel(t('launch.cancelling'), null, false);
   window.api.cancelLaunch();
+}
+
+// The whole panel is the button.
+launchPanel.addEventListener('click', (event) => {
+  event.stopPropagation();
+  // Otherwise the tile keeps the keyboard afterwards, and Enter - which is
+  // meant to start a game - would press this instead.
+  launchPanel.blur();
+  cancelLaunch();
 });
 
 // A failure takes over the whole window instead of arriving as a little grey
@@ -119,15 +157,20 @@ window.api.onLaunchProgress(progress => {
   if (['ended', 'failed', 'cancelled'].includes(progress.stage)) hidePanel();
 });
 
-playTile.addEventListener('click', async () => {
-  // This tile starts games. Nothing else. While one is being started or
-  // played the panel covers it, so this cannot be reached at all.
+async function startLaunch() {
+  // This starts games. Nothing else. While one is being started or played the
+  // panel covers the tile, so it cannot be reached at all.
+  if (playTile.classList.contains('hidden')) return;
+
+  const mine = ++attempt;
+  handedOver = false;
   showPanel(t('launch.preparing'), null, true);
 
   try {
     // A saved account first. Signing in on every click was never necessary -
     // the session simply was not being kept.
     const session = await window.api.getSession();
+    if (cancelledAttempt === mine) return;
 
     // Nobody to play as yet. Opening the Microsoft window here would hide the
     // fact that an offline account is also an option, so the account list is
@@ -139,7 +182,10 @@ playTile.addEventListener('click', async () => {
 
     // The saved sign-in went stale, which only happens to a Microsoft account.
     const profile = session.ok ? session.profile : await window.api.loginMicrosoft();
+    if (cancelledAttempt === mine) return;
 
+    // From here on the main process holds the launch and is the one to stop it.
+    handedOver = true;
     const result = await window.api.launchGame(profile);
 
     // The reason is shown on the blue screen; here the panel simply comes
@@ -149,6 +195,28 @@ playTile.addEventListener('click', async () => {
     // Closing the Microsoft window lands here, and so does a refusal from it.
     console.log('Launch did not start:', e.message);
     hidePanel();
+  }
+}
+
+playTile.addEventListener('click', startLaunch);
+
+// The tiles carry pictures of two keys, so those two keys had better do what
+// the pictures say. Enter starts a game, Esc calls one off - and Esc also
+// dismisses the blue screen, which is the one place it already means "away
+// with this" to everyone.
+window.addEventListener('keydown', (event) => {
+  const bluescreenUp = !bluescreen.classList.contains('hidden');
+
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    if (bluescreenUp) bluescreen.classList.add('hidden');
+    else cancelLaunch();
+    return;
+  }
+
+  if (event.key === 'Enter' && !bluescreenUp) {
+    event.preventDefault();
+    startLaunch();
   }
 });
 

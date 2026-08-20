@@ -33,7 +33,11 @@
          its own, so nothing can grow over it or push it off the screen. -->
     <button class="tile launch-panel hidden" id="launch-panel">
       <span class="launch-cross" id="launch-cross">
-        <svg viewBox="0 0 48 48" width="56" height="56" aria-hidden="true">
+        <!-- Play wears the Enter key, so cancel wears Esc - and both keys do
+             what their picture says. Until the picture is in place the cross
+             below stands in for it, so the tile is never empty. -->
+        <img src="assets/icons/stop.png" alt="" id="launch-esc">
+        <svg id="launch-cross-fallback" class="hidden" viewBox="0 0 48 48" width="56" height="56" aria-hidden="true">
           <line x1="12" y1="12" x2="36" y2="36" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
           <line x1="36" y1="12" x2="12" y2="36" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
         </svg>

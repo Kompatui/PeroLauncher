@@ -306,12 +306,32 @@ body { font-family: sans-serif; overflow: hidden; }
   transform: none;
 }
 
-/* The cross sits where the play arrow sat, in the middle of the tile. */
+/* The Esc key sits where the Enter key sat, in the middle of the tile. */
 .launch-cross {
   display: flex;
   align-items: center;
   justify-content: center;
   color: rgba(255, 255, 255, 0.95);
+  /* Fills the tile so the picture inside can be measured against the tile,
+     the way the play arrow is. A span sized by its contents has no width to
+     take a share of. */
+  width: 100%;
+  height: 100%;
+}
+
+/* Wider than the 20% the play arrow gets: that arrow is a tall shape, the
+   word ESC is a squat one, and matching their widths would leave this looking
+   half the size. Height is capped as well - this tile is shorter than play,
+   the progress strip having the bottom of the column. */
+.launch-cross img {
+  width: 34%;
+  max-height: 50%;
+  object-fit: contain;
+}
+
+.launch-cross img.hidden,
+.launch-cross svg.hidden {
+  display: none;
 }
 
 .launch-cross.hidden {

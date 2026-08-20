@@ -244,8 +244,10 @@ body { font-family: sans-serif; overflow: hidden; }
 .launch-foot {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
+  gap: 8px;
+  /* No padding at the sides: the bar runs the full width of the tile, edge to
+     edge, the way a strip along the bottom should. */
+  padding: 10px 0 0;
   background: rgba(0, 0, 0, 0.12);
 }
 
@@ -263,16 +265,15 @@ body { font-family: sans-serif; overflow: hidden; }
   font-size: 14px;
   color: rgba(255, 255, 255, 0.95);
   text-align: center;
-  max-width: 100%;
+  padding: 0 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .launch-bar {
-  width: min(220px, 80%);
+  width: 100%;
   height: 6px;
-  border-radius: 3px;
   background: rgba(0, 0, 0, 0.22);
   overflow: hidden;
 }

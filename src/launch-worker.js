@@ -16,21 +16,28 @@ const { spawn } = require('child_process');
 let child = null;
 let stopped = false;
 
-// Java leaves children of its own, so the whole tree goes.
+// Java leaves children of its own, so the whole tree goes - and then this
+// process goes too. Downloading carried on for another ten seconds otherwise,
+// which is not what anyone means by cancel: files are checked by hash before
+// they are used, so a half-written one is simply fetched again next time.
 function stopGame() {
   stopped = true;
-  if (!child) return;
 
-  try {
-    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
-  } catch (e) {
-    send({ type: 'debug', line: `[worker] taskkill refused: ${e.message}` });
+  if (child) {
+    try {
+      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
+    } catch (e) {
+      send({ type: 'debug', line: `[worker] taskkill refused: ${e.message}` });
+    }
+    try {
+      child.kill();
+    } catch (e) {
+      send({ type: 'debug', line: `[worker] could not stop the game: ${e.message}` });
+    }
   }
-  try {
-    child.kill();
-  } catch (e) {
-    send({ type: 'debug', line: `[worker] could not stop the game: ${e.message}` });
-  }
+
+  // A moment for the message above to get out, then everything here stops.
+  setTimeout(() => process.exit(0), 200);
 }
 
 function send(message) {

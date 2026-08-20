@@ -823,14 +823,10 @@ async function startGame(profile, ramOverride) {
     } catch (e) {
       if (e.message === 'needs-modloader') {
         const t = loadTranslations(currentLocale);
-        dialog.showMessageBox({
-          type: 'info',
-          title: t['jarmods.needsModLoaderTitle'],
-          message: t['jarmods.needsModLoaderTitle'],
-          detail: `${t['jarmods.needsModLoader']}\n\n${path.join(settings.gameFolder, 'jarmods')}`
+        say('failed', {
+          what: t['jarmods.needsModLoaderTitle'],
+          why: `${t['jarmods.needsModLoader']}\n\n${path.join(settings.gameFolder, 'jarmods')}`
         });
-        say('failed');
-        say('failed');
         return { started: false, error: 'needs-modloader' };
       }
       return fail('loader', e.message);
@@ -914,6 +910,19 @@ async function startGame(profile, ramOverride) {
 
     if (message.type === 'started') {
       launch.pid = message.pid;
+
+      // It spawned anyway. Telling the worker to stop does not reach into the
+      // middle of what the launcher library is doing, so a game could still
+      // appear a moment after being called off - and did. This is the second
+      // line: whatever started after the answer was given, gets stopped here.
+      if (launch.cancelled && message.pid) {
+        console.log(`[LAUNCH] a game appeared after being called off - stopping ${message.pid}`);
+        try {
+          spawn('taskkill', ['/pid', String(message.pid), '/T', '/F'], { windowsHide: true });
+        } catch (e) {
+          console.log('[LAUNCH] taskkill refused:', e.message);
+        }
+      }
       return;
     }
 
@@ -1576,54 +1585,67 @@ function smallerHeap(effectiveRam, freeAtLaunch) {
 
 // Without this the launcher stays silent and the game just blinks and
 // disappears, which tells the player nothing at all.
+// What a retry would look like, kept until it is asked for. The blue screen
+// asks rather than a system dialog, so the answer comes back separately.
+let offeredRetry = null;
+
 function reportGameCrash(code, output, effectiveRam, freeAtLaunch, profile) {
   const t = loadTranslations(currentLocale);
+  const window = BrowserWindow.getAllWindows()[0];
 
   // Which reading of the crash was taken, so a wrong one can be seen from the
-  // terminal instead of guessed at from the dialog that followed.
+  // terminal instead of guessed at from the screen that followed.
   console.log(`[CRASH] exit ${code}, ${output.length} chars captured, ` +
     `heap-too-big-to-start: ${heapTooBigToStart(output)}`);
+
+  const show = report => {
+    if (window && !window.isDestroyed()) window.webContents.send('game-crashed', report);
+  };
 
   // The game never started: Java would not take the heap.
   if (heapTooBigToStart(output)) {
     const retryWith = smallerHeap(effectiveRam, freeAtLaunch);
 
-    const answer = dialog.showMessageBoxSync({
-      type: 'warning',
-      title: t['crash.title'],
-      message: t['crash.heapTooBigShort'],
-      detail: `${t['crash.heapTooBig']}\n\n` +
-        `${t['crash.givenRam']}: ${effectiveRam} ${t['settings.mib']}\n` +
-        `${t['crash.freeAtLaunch']}: ${freeAtLaunch} ${t['settings.mib']}\n\n` +
-        `${t['crash.heapIsNotAll']}`,
-      buttons: [`${t['crash.retryWith']} ${retryWith} ${t['settings.mib']}`, t['crash.giveUp']],
-      defaultId: 0,
-      cancelId: 1
-    });
-
     // Only this once, and only for this launch - the setting is left alone,
     // because a machine with a browser closed will take the larger figure
     // again tomorrow.
-    if (answer === 0 && profile) startGame(profile, retryWith);
-    return;
+    offeredRetry = profile ? { profile, ram: retryWith } : null;
+
+    return show({
+      what: t['crash.heapTooBigShort'],
+      why: `${t['crash.heapTooBig']}\n\n` +
+        `${t['crash.givenRam']}: ${effectiveRam} ${t['settings.mib']}\n` +
+        `${t['crash.freeAtLaunch']}: ${freeAtLaunch} ${t['settings.mib']}\n\n` +
+        t['crash.heapIsNotAll'],
+      action: offeredRetry ? `${t['crash.retryWith']} ${retryWith} ${t['settings.mib']}` : null
+    });
   }
 
   const outOfMemory = /insufficient memory|OutOfMemoryError|failed to allocate/i.test(output);
 
-  const detail = outOfMemory
-    ? `${t['crash.outOfMemory']}\n\n` +
-      `${t['crash.givenRam']}: ${effectiveRam} ${t['settings.mib']}\n` +
-      `${t['crash.freeAtLaunch']}: ${freeAtLaunch} ${t['settings.mib']}\n\n` +
-      t['crash.heapIsNotAll']
-    : `${t['crash.exitCode']}: ${code}\n\n${output.trim().split('\n').slice(-6).join('\n')}`;
-
-  dialog.showMessageBox({
-    type: 'warning',
-    title: t['crash.title'],
-    message: outOfMemory ? t['crash.outOfMemoryShort'] : t['crash.title'],
-    detail
-  });
+  show(outOfMemory
+    ? {
+      what: t['crash.outOfMemoryShort'],
+      why: `${t['crash.outOfMemory']}\n\n` +
+        `${t['crash.givenRam']}: ${effectiveRam} ${t['settings.mib']}\n` +
+        `${t['crash.freeAtLaunch']}: ${freeAtLaunch} ${t['settings.mib']}\n\n` +
+        t['crash.heapIsNotAll']
+    }
+    : {
+      what: t['crash.title'],
+      why: `${t['crash.exitCode']}: ${code}`,
+      technical: output.trim().split('\n').slice(-6).join('\n')
+    });
 }
+
+ipcMain.handle('retry-launch', () => {
+  if (!offeredRetry) return false;
+
+  const { profile, ram } = offeredRetry;
+  offeredRetry = null;
+  startGame(profile, ram);
+  return true;
+});
 
 const PLAIN_VERSION = /^\d+(\.\d+)*$/;
 

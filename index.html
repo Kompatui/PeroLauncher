@@ -28,15 +28,22 @@
     <div class="tile green" id="tile-play">
       <img src="assets/icons/play.png" alt="">
 
-      <!-- Covers the play tile while a launch is under way. Its own element
-           with its own button, so cancelling can never be mistaken for
-           starting: the two are different things and are not the same
-           control wearing a different colour. -->
-      <div class="launch-panel hidden" id="launch-panel">
-        <span class="launch-text" id="launch-text"></span>
-        <span class="launch-bar"><span class="launch-fill" id="launch-fill"></span></span>
-        <button class="launch-cancel" id="btn-cancel"></button>
-      </div>
+      <!-- Takes the play tile's place while a launch is under way. The whole
+           panel is the cancel button, the same size and in the same spot as
+           the tile it replaces - aiming at a small button inside a large red
+           area meant a press could land on nothing at all. -->
+      <button class="launch-panel hidden" id="launch-panel">
+        <span class="launch-cross" id="launch-cross">
+          <svg viewBox="0 0 48 48" width="56" height="56" aria-hidden="true">
+            <line x1="12" y1="12" x2="36" y2="36" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+            <line x1="36" y1="12" x2="12" y2="36" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <span class="launch-foot">
+          <span class="launch-text" id="launch-text"></span>
+          <span class="launch-bar"><span class="launch-fill" id="launch-fill"></span></span>
+        </span>
+      </button>
     </div>
     <div class="tile grey" id="tile-settings"><img src="assets/icons/settings.png" alt=""></div>
     <div class="tile white" id="tile-skin"><img src="assets/icons/skin.png" alt=""></div>
@@ -48,7 +55,10 @@
       <h1 id="bluescreen-what"></h1>
       <p id="bluescreen-why"></p>
       <p class="bluescreen-technical" id="bluescreen-technical"></p>
-      <button id="bluescreen-continue"></button>
+      <div class="bluescreen-buttons">
+        <button id="bluescreen-action" class="hidden"></button>
+        <button id="bluescreen-continue"></button>
+      </div>
     </div>
   </div>
 

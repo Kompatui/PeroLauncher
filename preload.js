@@ -44,6 +44,8 @@ contextBridge.exposeInMainWorld('api', {
   installLocalModpack: (filePath) => ipcRenderer.invoke('install-local-modpack', filePath),
   onModpackProgress: (callback) => ipcRenderer.on('modpack-progress', (event, progress) => callback(progress)),
   onLaunchProgress: (callback) => ipcRenderer.on('launch-progress', (event, progress) => callback(progress)),
+  onGameCrashed: (callback) => ipcRenderer.on('game-crashed', (event, report) => callback(report)),
+  retryLaunch: () => ipcRenderer.invoke('retry-launch'),
   searchMods: (id, query, offset, categories, kind) => ipcRenderer.invoke('search-mods', id, query, offset, categories, kind),
   installMod: (id, source, projectId, kind) => ipcRenderer.invoke('install-mod', id, source, projectId, kind),
   openCrashReports: () => ipcRenderer.invoke('open-crash-reports'),

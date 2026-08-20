@@ -6,7 +6,7 @@ const playTile = document.getElementById('tile-play');
 const launchPanel = document.getElementById('launch-panel');
 const launchText = document.getElementById('launch-text');
 const launchFill = document.getElementById('launch-fill');
-const cancelButton = document.getElementById('btn-cancel');
+const launchCross = document.getElementById('launch-cross');
 
 // Starting and stopping are two different things, so they are two different
 // controls. One tile that changed colour and meaning was where every one of
@@ -21,8 +21,11 @@ function showPanel(text, fraction, canCancel) {
   launchFill.style.width = fraction === null ? '0' : `${Math.round(fraction * 100)}%`;
   launchFill.classList.toggle('working', fraction === null);
 
-  cancelButton.textContent = t('launch.cancel');
-  cancelButton.classList.toggle('hidden', !canCancel);
+  // Once the game is up there is nothing to call off, so the cross goes and
+  // the panel stops being a button - it is only telling you something then.
+  launchCross.classList.toggle('hidden', !canCancel);
+  launchPanel.classList.toggle('waiting', !canCancel);
+  launchPanel.disabled = !canCancel;
 
   launchPanel.classList.remove('hidden');
 }
@@ -31,29 +34,39 @@ function hidePanel() {
   launchPanel.classList.add('hidden');
 }
 
-// Nothing here starts anything. It can only ever call off what is running.
-cancelButton.addEventListener('click', (event) => {
+// The whole panel is the button. Nothing here starts anything: it can only
+// ever call off what is already running.
+launchPanel.addEventListener('click', (event) => {
   event.stopPropagation();
+  if (launchPanel.disabled) return;
+
   showPanel(t('launch.cancelling'), null, false);
   window.api.cancelLaunch();
 });
-
-// A press anywhere else on the panel is not a press on the tile underneath.
-launchPanel.addEventListener('click', (event) => event.stopPropagation());
 
 // A failure takes over the whole window instead of arriving as a little grey
 // box from the operating system. It is the launcher's own screen, in the
 // launcher's own words, and it cannot be missed.
 const bluescreen = document.getElementById('bluescreen');
 
-function showBluescreen(progress) {
-  document.getElementById('bluescreen-what').textContent = progress.what || t('launch.failedTitle');
-  document.getElementById('bluescreen-why').textContent = progress.why || '';
+const bluescreenAction = document.getElementById('bluescreen-action');
+
+function showBluescreen(report) {
+  document.getElementById('bluescreen-what').textContent = report.what || t('launch.failedTitle');
+  document.getElementById('bluescreen-why').textContent = report.why || '';
 
   // The part for whoever is reading over the player's shoulder.
   const technical = document.getElementById('bluescreen-technical');
-  technical.textContent = progress.technical ? `${progress.code}: ${progress.technical}` : '';
-  technical.classList.toggle('hidden', !progress.technical);
+  const line = report.technical
+    ? (report.code ? `${report.code}: ${report.technical}` : report.technical)
+    : '';
+  technical.textContent = line;
+  technical.classList.toggle('hidden', !line);
+
+  // Some failures have something worth doing about them, and the screen that
+  // reports one is the right place to offer it.
+  bluescreenAction.textContent = report.action || '';
+  bluescreenAction.classList.toggle('hidden', !report.action);
 
   document.getElementById('bluescreen-continue').textContent = t('bluescreen.continue');
   bluescreen.classList.remove('hidden');
@@ -61,6 +74,19 @@ function showBluescreen(progress) {
 
 document.getElementById('bluescreen-continue').addEventListener('click', () => {
   bluescreen.classList.add('hidden');
+});
+
+bluescreenAction.addEventListener('click', async () => {
+  bluescreen.classList.add('hidden');
+  showPanel(t('launch.preparing'), null, true);
+  await window.api.retryLaunch();
+});
+
+// The game died. It reads the same as a launch that never started, because to
+// the person waiting to play it is the same thing.
+window.api.onGameCrashed(report => {
+  hidePanel();
+  showBluescreen(report);
 });
 
 window.api.onLaunchProgress(progress => {

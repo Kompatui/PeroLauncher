@@ -163,6 +163,16 @@ body { font-family: sans-serif; overflow: hidden; }
   display: none;
 }
 
+.bluescreen-buttons {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.bluescreen button.hidden {
+  display: none;
+}
+
 .bluescreen button {
   margin-top: 18px;
   padding: 10px 26px;
@@ -188,15 +198,61 @@ body { font-family: sans-serif; overflow: hidden; }
   position: absolute;
   inset: 0;
   z-index: 3;
-  background: #ff8080;
+  /* Deeper than the mods tile beside it. At the same pastel red the two read
+     as one pair of red tiles rather than a tile and the thing covering it. */
+  background: #e03131;
+  color: #fff;
+  border: none;
+  font-family: inherit;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  padding: 0;
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.launch-panel:hover {
+  background: #c92a2a;
+}
+
+/* Nothing left to cancel - it is a notice now, not a button. */
+.launch-panel.waiting {
+  background: #2f9e44;
+  cursor: default;
+}
+
+.launch-panel.waiting:hover {
+  background: #2f9e44;
+}
+
+/* The cross sits where the play arrow sat, in the middle of the tile. */
+.launch-cross {
+  flex: 1;
+  display: flex;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  padding: 16px;
-  box-sizing: border-box;
-  cursor: default;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.launch-cross.hidden {
+  display: none;
+}
+
+/* And the words stay along the bottom edge, where they were before. */
+.launch-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+/* With no cross above it there is nothing to push it down, so it holds the
+   bottom on its own. */
+.launch-panel.waiting .launch-foot {
+  margin-top: auto;
 }
 
 .launch-panel.hidden {
@@ -205,7 +261,7 @@ body { font-family: sans-serif; overflow: hidden; }
 
 .launch-text {
   font-size: 14px;
-  color: #5c1010;
+  color: rgba(255, 255, 255, 0.95);
   text-align: center;
   max-width: 100%;
   overflow: hidden;
@@ -217,7 +273,7 @@ body { font-family: sans-serif; overflow: hidden; }
   width: min(220px, 80%);
   height: 6px;
   border-radius: 3px;
-  background: rgba(0, 0, 0, 0.15);
+  background: rgba(0, 0, 0, 0.22);
   overflow: hidden;
 }
 
@@ -225,7 +281,7 @@ body { font-family: sans-serif; overflow: hidden; }
   display: block;
   height: 100%;
   width: 0;
-  background: #7a1414;
+  background: rgba(255, 255, 255, 0.9);
   transition: width 0.25s ease;
 }
 

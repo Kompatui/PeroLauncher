@@ -61,8 +61,12 @@ body { font-family: sans-serif; overflow: hidden; }
 
 .grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  grid-template-rows: 1fr 1fr;
+  /* minmax(0, 1fr) rather than 1fr: a plain 1fr grows to fit whatever is
+     inside it, so the tall canvas holding the player was stretching its row
+     and squashing the one above. The tiles are equal by definition now, and
+     what is in them has no say. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
   height: calc(100vh - 40px);
   position: relative;
 }
@@ -75,6 +79,9 @@ body { font-family: sans-serif; overflow: hidden; }
   cursor: pointer;
   position: relative;
   z-index: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   transition: transform 0.15s ease, background-color 0.15s ease;
 }
 
@@ -110,13 +117,18 @@ body { font-family: sans-serif; overflow: hidden; }
   justify-content: center;
   gap: 10px;
   height: 100%;
+  min-height: 0;
   padding: 12px;
   box-sizing: border-box;
 }
 
-/* The viewer sets the canvas size itself, to the room the tile has. */
+/* The viewer sets the canvas size itself, but never larger than the tile:
+   between opening the window and the first measurement it holds a default
+   size, and that was enough to bend the grid out of shape. */
 .player-body {
   cursor: grab;
+  max-width: 100%;
+  max-height: 100%;
 }
 
 .player-body:active {

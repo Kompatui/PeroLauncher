@@ -704,3 +704,35 @@
   background: #f5f5f5;
 }
 
+
+/* ------------------------------------------- which build of a pack to take
+
+   Published builds, newest first. The game version comes first on each line
+   because that is what the choice is actually about: a pack for 1.21 is no
+   use to somebody whose world, server and friends are on 1.20.
+*/
+
+.build-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 46vh;
+  overflow-y: auto;
+  margin-bottom: 6px;
+}
+
+.build-list .modal-lang-option {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+}
+
+.build-version {
+  font-size: 15px;
+}
+
+.build-meta {
+  font-size: 12px;
+  color: #888;
+}

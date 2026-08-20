@@ -706,11 +706,19 @@ ipcMain.handle('search-modpacks', async (event, query, offset, categories) => {
   }
 });
 
+ipcMain.handle('list-modpack-builds', async (event, projectId) => {
+  try {
+    return { ok: true, builds: await modpackBuilds(projectId) };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 // Installing a whole pack takes minutes, so the page is told how it is going.
-ipcMain.handle('install-modpack', async (event, projectId) => {
+ipcMain.handle('install-modpack', async (event, projectId, buildId = null) => {
   try {
     const report = progress => event.sender.send('modpack-progress', progress);
-    return { ok: true, pack: await installModpack(projectId, report) };
+    return { ok: true, pack: await installModpack(projectId, buildId, report) };
   } catch (e) {
     return { ok: false, error: e.message };
   }
@@ -1449,12 +1457,48 @@ async function searchModpacks(query, offset = 0, categories = []) {
 // Installs a whole pack as a new one of ours: its version, its loader, its
 // mods and whatever else it ships. Long enough that it reports as it goes -
 // several minutes of silence would look like a hang.
-async function installModpack(projectId, report = () => {}) {
+// Every published build of a pack, so the player can take the one they want.
+// Packs are made for a particular version of the game, and the newest build is
+// often for a version somebody is not ready to move to - a world, a server or
+// a friend can all be a reason to stay where they are.
+async function modpackBuilds(projectId) {
+  const builds = await fetchJson(
+    `${MODRINTH}/project/${encodeURIComponent(projectId)}/version`, { headers: MOD_API_HEADERS });
+  if (!Array.isArray(builds)) return [];
+
+  // One line per version of the game, not per build. A pack that has been
+  // going for years has hundreds of builds - Fabulously Optimized had 463 -
+  // and a list of those is not a choice anyone can make. What is being chosen
+  // here is the version of Minecraft; for each one, the newest build that was
+  // made for it, which is the one that pack's author would hand over.
+  const newestFor = new Map();
+
+  for (const build of builds) {
+    if (!(build.files || []).length) continue;
+
+    for (const gameVersion of build.game_versions || []) {
+      if (newestFor.has(gameVersion)) continue;
+      newestFor.set(gameVersion, {
+        id: build.id,
+        gameVersion,
+        number: build.version_number,
+        loaders: build.loaders || [],
+        published: build.date_published
+      });
+    }
+  }
+
+  // Newest build first, which puts the newest game version at the top.
+  return [...newestFor.values()].sort((a, b) => String(b.published).localeCompare(String(a.published)));
+}
+
+async function installModpack(projectId, buildId = null, report = () => {}) {
   const builds = await fetchJson(
     `${MODRINTH}/project/${encodeURIComponent(projectId)}/version`, { headers: MOD_API_HEADERS });
   if (!Array.isArray(builds) || !builds.length) throw new Error('this pack has no published build');
 
-  const build = builds[0];
+  // Whichever one was chosen; the newest when nothing was.
+  const build = (buildId && builds.find(entry => entry.id === buildId)) || builds[0];
   const archive = build.files.find(file => file.primary) || build.files[0];
   if (!archive) throw new Error('this build has no file');
 

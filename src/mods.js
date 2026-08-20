@@ -39,6 +39,23 @@ function closeModal() {
   modalBox.innerHTML = '';
 }
 
+// The settings page has these two as well, and this page does not load its
+// script - so every modal here that offered a way out was throwing instead of
+// drawing one. It went unseen because those are the modals nobody reaches
+// unless something has already gone wrong.
+function closeButtonHtml() {
+  return `
+    <div class="modal-buttons">
+      <button class="modal-btn-cancel" id="modal-cancel">${t('modal.close')}</button>
+    </div>
+  `;
+}
+
+function wireCloseButton() {
+  const button = document.getElementById('modal-cancel');
+  if (button) button.addEventListener('click', closeModal);
+}
+
 overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
 
@@ -569,6 +586,67 @@ async function installPack(run, label) {
   openPack(result.pack.id);
 }
 
+// Which build of the pack to take. It used to take the newest without asking,
+// and the newest is often for a version of the game somebody is not ready to
+// move to - their world, their server or their friends are still on the old
+// one. Every published build is listed, newest first, with the game version it
+// is for.
+async function choosePackBuild(projectId, title) {
+  modalBox.innerHTML = `
+    <h3>${escapeHtml(title || '')}</h3>
+    <p class="modal-note">${t('packs.pickBuildLoading')}</p>
+  `;
+  overlay.classList.remove('hidden');
+
+  const result = await window.api.listModpackBuilds(projectId);
+
+  if (!result.ok || !result.builds.length) {
+    modalBox.innerHTML = `
+      <h3>${escapeHtml(title || '')}</h3>
+      <p class="modal-note warn">${escapeHtml(result.error || t('packs.noBuilds'))}</p>
+      ${closeButtonHtml()}
+    `;
+    wireCloseButton();
+    return;
+  }
+
+  // Only one build to be had: asking would be a question with one answer.
+  if (result.builds.length === 1) {
+    closeModal();
+    installPack(() => window.api.installModpack(projectId, result.builds[0].id), title);
+    return;
+  }
+
+  const rows = result.builds.map((build, index) => {
+    const versions = build.gameVersion || t('packs.buildAnyVersion');
+    const loaders = build.loaders.map(name => LOADER_NAMES[name] || name).join(', ');
+    // The first one is the newest, and said so rather than merely being first.
+    const meta = [loaders, build.number, index === 0 ? t('packs.buildNewest') : '']
+      .filter(Boolean).join(' · ');
+    return `
+      <div class="modal-lang-option${index === 0 ? ' current' : ''}" data-build="${escapeHtml(build.id)}">
+        <span class="build-version">${escapeHtml(versions)}</span>
+        <span class="build-meta">${escapeHtml(meta)}</span>
+      </div>
+    `;
+  }).join('');
+
+  modalBox.innerHTML = `
+    <h3>${escapeHtml(title || '')}</h3>
+    <p class="modal-note">${t('packs.pickBuild')}</p>
+    <div class="build-list">${rows}</div>
+    ${closeButtonHtml()}
+  `;
+  wireCloseButton();
+
+  modalBox.querySelectorAll('.modal-lang-option').forEach(option => {
+    option.addEventListener('click', () => {
+      closeModal();
+      installPack(() => window.api.installModpack(projectId, option.dataset.build), title);
+    });
+  });
+}
+
 async function browseModpacks() {
   goBack = showPacks;
   page.className = 'packs-page';
@@ -652,8 +730,8 @@ async function browseModpacks() {
       if (button.dataset.wired) return;
       button.dataset.wired = '1';
       button.textContent = t('packs.installPack');
-      button.addEventListener('click', () => installPack(
-        () => window.api.installModpack(card.dataset.id),
+      button.addEventListener('click', () => choosePackBuild(
+        card.dataset.id,
         card.querySelector('.mod-card-title')?.textContent.trim()
       ));
     });

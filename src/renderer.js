@@ -230,39 +230,32 @@ window.addEventListener('keydown', (event) => {
 // that can manage.
 let viewer = null;
 
-// How large the figure may be drawn. What this costs is the number of pixels,
-// not the figure: filling the whole tile meant six times the pixels at full
-// screen as in a small window, sixty times a second, and the launcher stood
-// there spending most of a processor on a character breathing. Past this size
-// there is nothing more to see anyway - the skin itself is 64 pixels across.
-const PLAYER_MAX_WIDTH = 240;
-const PLAYER_MAX_HEIGHT = 330;
+// How many pixels the figure is allowed to take, counted in the screen's own
+// pixels. This is what the drawing costs - the graphics card is switched off
+// here and the processor works out every one of them, sixty times a second.
+// Filling the whole tile came to 1293x1000 with the window at full screen, and
+// the launcher spent most of a processor on a character standing still.
+//
+// It is a limit on size, not on sharpness: the figure is always drawn at the
+// screen's own pixels, never drawn small and stretched. Stretching is what
+// costs nothing and looks it - the picture goes pale and every slope turns
+// into a staircase.
+const PLAYER_MAX_PIXELS_WIDE = 560;
+const PLAYER_MAX_PIXELS_TALL = 770;
 
 function fitViewer() {
   if (!viewer) return;
 
   const tile = document.getElementById('tile-skin').getBoundingClientRect();
+  const ratio = window.devicePixelRatio || 1;
+
   // The room there is for it: the whole tile, less a margin so the figure does
-  // not touch the edges.
-  const room = {
-    width: Math.max(80, tile.width - 36),
-    height: Math.max(80, tile.height - 36)
-  };
+  // not touch the edges - and no more than the budget above.
+  const width = Math.min(Math.max(80, tile.width - 36), PLAYER_MAX_PIXELS_WIDE / ratio);
+  const height = Math.min(Math.max(80, tile.height - 36), PLAYER_MAX_PIXELS_TALL / ratio);
 
-  // Drawn small, shown large. Working out a picture costs by the pixel;
-  // stretching a finished one does not, and a character built of cubes from a
-  // skin 64 pixels across has no fine detail to lose.
-  const drawn = {
-    width: Math.min(room.width, PLAYER_MAX_WIDTH),
-    height: Math.min(room.height, PLAYER_MAX_HEIGHT)
-  };
-  viewer.setSize(drawn.width, drawn.height);
-
-  // Same shape as it was drawn in, or the figure would come out stretched.
-  const canvas = document.getElementById('player-body');
-  const scale = Math.min(room.width / drawn.width, room.height / drawn.height);
-  canvas.style.width = `${Math.round(drawn.width * scale)}px`;
-  canvas.style.height = `${Math.round(drawn.height * scale)}px`;
+  viewer.pixelRatio = ratio;
+  viewer.setSize(width, height);
 }
 
 // When the figure is worth drawing. Not while the game is in front or the
@@ -300,15 +293,14 @@ async function showPlayer() {
   canvas.classList.remove('hidden');
 
   if (!viewer) {
-    // pixelRatio 1: left to itself the viewer follows the screen, and on a
-    // screen at 125% that is another 56% more pixels to work out for a figure
-    // nobody is inspecting closely.
-    viewer = new skinview3d.SkinViewer({ canvas, width: 200, height: 260, pixelRatio: 1 });
+    viewer = new skinview3d.SkinViewer({ canvas, width: 200, height: 260 });
 
-    // Smoothing the edges is a second pass over every pixel of the picture.
-    // The character is made of squares and its skin is 64 pixels across -
-    // there is nothing there to smooth, and the pass costs as much as the
-    // drawing it follows.
+    // No edge smoothing. Measured, it costs more than doubling the resolution
+    // does - 44% of this machine against 21% - and it is the resolution that
+    // decides how the figure looks. Drawn at the screen's own pixels there is
+    // a pixel of jaggedness left on the slopes; drawn smaller and stretched,
+    // with the smoothing on, the steps were three times the size and the whole
+    // figure went pale.
     if (viewer.composer && viewer.fxaaPass && viewer.composer.removePass) {
       viewer.composer.removePass(viewer.fxaaPass);
     }

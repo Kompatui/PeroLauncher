@@ -43,12 +43,14 @@ function showPanel(text, fraction, canCancel) {
   playTile.classList.add('hidden');
   launchPanel.classList.remove('hidden');
   launchProgress.classList.remove('hidden');
+  updateDrawing();
 }
 
 function hidePanel() {
   launchPanel.classList.add('hidden');
   launchProgress.classList.add('hidden');
   playTile.classList.remove('hidden');
+  updateDrawing();
 }
 
 // Which launch is on screen, and which one the player has called off. A launch
@@ -228,13 +230,56 @@ window.addEventListener('keydown', (event) => {
 // that can manage.
 let viewer = null;
 
+// How large the figure may be drawn. What this costs is the number of pixels,
+// not the figure: filling the whole tile meant six times the pixels at full
+// screen as in a small window, sixty times a second, and the launcher stood
+// there spending most of a processor on a character breathing. Past this size
+// there is nothing more to see anyway - the skin itself is 64 pixels across.
+const PLAYER_MAX_WIDTH = 240;
+const PLAYER_MAX_HEIGHT = 330;
+
 function fitViewer() {
   if (!viewer) return;
 
   const tile = document.getElementById('tile-skin').getBoundingClientRect();
-  // The whole tile, less a margin so the figure does not touch the edges.
-  viewer.setSize(Math.max(80, tile.width - 36), Math.max(80, tile.height - 36));
+  // The room there is for it: the whole tile, less a margin so the figure does
+  // not touch the edges.
+  const room = {
+    width: Math.max(80, tile.width - 36),
+    height: Math.max(80, tile.height - 36)
+  };
+
+  // Drawn small, shown large. Working out a picture costs by the pixel;
+  // stretching a finished one does not, and a character built of cubes from a
+  // skin 64 pixels across has no fine detail to lose.
+  const drawn = {
+    width: Math.min(room.width, PLAYER_MAX_WIDTH),
+    height: Math.min(room.height, PLAYER_MAX_HEIGHT)
+  };
+  viewer.setSize(drawn.width, drawn.height);
+
+  // Same shape as it was drawn in, or the figure would come out stretched.
+  const canvas = document.getElementById('player-body');
+  const scale = Math.min(room.width / drawn.width, room.height / drawn.height);
+  canvas.style.width = `${Math.round(drawn.width * scale)}px`;
+  canvas.style.height = `${Math.round(drawn.height * scale)}px`;
 }
+
+// When the figure is worth drawing. Not while the game is in front or the
+// launcher is minimised - that is work done for an empty room, and exactly
+// when the machine has a game to run and needs everything it has. Not during
+// a launch either: thousands of files are being fetched and checked, and the
+// progress bar is there to show the launcher is alive.
+function updateDrawing() {
+  if (!viewer) return;
+
+  const launching = !launchPanel.classList.contains('hidden');
+  viewer.renderPaused = document.hidden || !document.hasFocus() || launching;
+}
+
+document.addEventListener('visibilitychange', updateDrawing);
+window.addEventListener('focus', updateDrawing);
+window.addEventListener('blur', updateDrawing);
 
 async function showPlayer() {
   const player = await window.api.getPlayer();
@@ -255,7 +300,18 @@ async function showPlayer() {
   canvas.classList.remove('hidden');
 
   if (!viewer) {
-    viewer = new skinview3d.SkinViewer({ canvas, width: 200, height: 260 });
+    // pixelRatio 1: left to itself the viewer follows the screen, and on a
+    // screen at 125% that is another 56% more pixels to work out for a figure
+    // nobody is inspecting closely.
+    viewer = new skinview3d.SkinViewer({ canvas, width: 200, height: 260, pixelRatio: 1 });
+
+    // Smoothing the edges is a second pass over every pixel of the picture.
+    // The character is made of squares and its skin is 64 pixels across -
+    // there is nothing there to smooth, and the pass costs as much as the
+    // drawing it follows.
+    if (viewer.composer && viewer.fxaaPass && viewer.composer.removePass) {
+      viewer.composer.removePass(viewer.fxaaPass);
+    }
 
     // Turning it is worth having; wheeling it closer and further is not, and
     // would only fight with the scroll on the page.

@@ -769,6 +769,37 @@ ipcMain.handle('cancel-launch', (event) => {
       console.log('[LAUNCH] could not reach the launch worker:', e.message);
     }
   }
+
+  // A game already on its feet is taken down from here as well. The worker is
+  // asked to do it, but it only reads its messages between pieces of work.
+  if (activeLaunch.pid) {
+    try {
+      spawn('taskkill', ['/pid', String(activeLaunch.pid), '/T', '/F'], { windowsHide: true });
+    } catch (e) {
+      console.log('[LAUNCH] taskkill refused:', e.message);
+    }
+  }
+
+  // And if it has not gone by itself, it is taken down. Between three thousand
+  // downloads there is barely a gap for it to notice the message in: measured,
+  // it carried on fetching for another ten to twenty seconds after being told
+  // to stop. Nothing is lost by cutting it off - every file is checked by hash
+  // before it is used, so a half-written one is simply fetched again.
+  const abandoned = activeLaunch;
+  setTimeout(() => {
+    if (!abandoned.worker) return;
+
+    try {
+      abandoned.worker.kill();
+      console.log('[LAUNCH] the worker had not stopped on its own - taken down');
+    } catch (e) {
+      console.log('[LAUNCH] could not take down the worker:', e.message);
+    }
+
+    abandoned.worker = null;
+    if (activeLaunch === abandoned) activeLaunch = null;
+  }, 1500);
+
   return true;
 });
 

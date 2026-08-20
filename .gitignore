@@ -17,6 +17,10 @@ instances/
 secrets.json
 versions-cache.json
 java-versions.json
+# Fetched from Modrinth and kept only so the launcher works without a
+# connection. Nothing here is written by hand.
+modrinth-categories.json
+modrinth-versions.json
 
 # Local tooling notes and settings
 .claude/

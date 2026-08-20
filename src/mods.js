@@ -620,7 +620,9 @@ async function choosePackBuild(projectId, title, wanted = '') {
   const only = result.builds.length === 1 ? result.builds[0] : null;
 
   if (asked || only) {
-    closeModal();
+    // Straight from "looking" to "installing" in the same window. Closing it
+    // first and opening it again is a blink on screen and tells nobody
+    // anything - installPack draws over this box itself.
     installPack(() => window.api.installModpack(projectId, (asked || only).id), title);
     return;
   }

@@ -127,6 +127,10 @@ body { font-family: sans-serif; overflow: hidden; }
   display: none;
 }
 
+.player-name.hidden {
+  display: none;
+}
+
 .player-name {
   font-size: 15px;
   color: #444;

@@ -164,8 +164,8 @@ function fitViewer() {
   if (!viewer) return;
 
   const tile = document.getElementById('tile-skin').getBoundingClientRect();
-  // Room left underneath for the name.
-  viewer.setSize(Math.max(80, tile.width - 40), Math.max(80, tile.height - 70));
+  // The whole tile, less a margin so the figure does not touch the edges.
+  viewer.setSize(Math.max(80, tile.width - 36), Math.max(80, tile.height - 36));
 }
 
 async function showPlayer() {
@@ -173,14 +173,17 @@ async function showPlayer() {
   const name = document.getElementById('player-name');
   const canvas = document.getElementById('player-body');
 
-  // Nobody signed in: the tile says so rather than standing empty.
+  // Nobody signed in: the tile says so rather than standing empty. This is the
+  // only time it carries words - a figure needs no caption, and the main
+  // screen is meant to be pictures.
   if (!player || !player.image) {
     name.textContent = player ? player.name : t('player.nobody');
+    name.classList.remove('hidden');
     canvas.classList.add('hidden');
     return;
   }
 
-  name.textContent = player.name;
+  name.classList.add('hidden');
   canvas.classList.remove('hidden');
 
   if (!viewer) {

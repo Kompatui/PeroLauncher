@@ -51,6 +51,8 @@ const defaultSettings = {
   // help on a machine where it has to be switched off - so it can be turned
   // off. On, because it is the nicest thing on the screen.
   playerModel: true,
+  // How the pack list is laid out: one under another, or two across.
+  packsView: 'list',
   versionFilters: {
     loadFromServer: true,
     mods: true,

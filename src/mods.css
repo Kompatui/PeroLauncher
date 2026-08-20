@@ -6,6 +6,113 @@
   box-sizing: border-box;
 }
 
+/* The list of packs is laid out like the main screen: a heading, tiles edge to
+   edge, and a row of coloured tiles fixed along the bottom. No page padding of
+   its own, so nothing floats in a margin. */
+.packs-page.flush {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.packs-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px 12px;
+  flex: 0 0 auto;
+}
+
+.packs-top h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+/* Switches the packs between a list and two across. A tile like everything
+   else here, only small enough to sit beside the heading. */
+.view-tile {
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  padding: 0;
+  background: #e0e0e0;
+  color: #333;
+  cursor: pointer;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.view-tile:hover {
+  transform: scale(1.03);
+  background: #bdbdbd;
+}
+
+/* Only this part scrolls. The heading stays, the row of tiles at the bottom
+   stays, and the packs run past between them. */
+.pack-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Three tiles across the bottom, the width of the window, in the colours of
+   the main screen. */
+.pack-dock {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  height: 92px;
+}
+
+.dock-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  min-width: 0;
+  position: relative;
+  z-index: 1;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.dock-tile:hover {
+  transform: scale(1.03);
+  z-index: 2;
+}
+
+.dock-tile img {
+  width: 34%;
+  max-height: 60%;
+  object-fit: contain;
+}
+
+.dock-tile .hidden {
+  display: none;
+}
+
+.dock-tile img.hidden {
+  display: none;
+}
+
+/* Named for what they do, not for their colour: this page also loads the
+   main screen's stylesheet, where .green and .yellow are particular tiles in
+   a particular grid - and borrowing those names put the row in the wrong
+   order and stretched one tile over two rows. */
+.dock-tile.create { background: #7CFC7C; color: #000; }
+.dock-tile.create:hover { background: #35e835; }
+
+.dock-tile.find { background: #262626; color: #fff; }
+.dock-tile.find:hover { background: #000; }
+
+.dock-tile.import { background: #ffe066; color: #000; }
+.dock-tile.import:hover { background: #ffc400; }
+
 .packs-head h2,
 .pack-head h2 {
   margin: 0 0 6px;
@@ -26,6 +133,34 @@
   gap: 2px;
 }
 
+/* Two across, as boxes rather than lines. The same tiles, given room to be
+   square-ish instead of wide. */
+/* Not called "grid": the main screen's stylesheet is loaded here too, and its
+   .grid is the two-row, three-column main menu - complete with a height of a
+   whole window and rows of 1fr, which turned two packs into two slabs. */
+.pack-list.boxes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* A height of their own, and packed from the top: left to itself the grid
+     shares out whatever room there is, and two packs became two enormous
+     slabs with their names stranded at the bottom. */
+  grid-auto-rows: 132px;
+  align-content: start;
+  gap: 2px;
+}
+
+.pack-list.boxes .pack-row {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  min-height: 0;
+  gap: 10px;
+}
+
+.pack-list.boxes .pack-name {
+  font-size: 19px;
+}
+
 /* The same tile behaviour as everywhere else: a quiet surface that lifts and
    deepens under the pointer. */
 .pack-row {
@@ -36,27 +171,29 @@
   min-height: 66px;
   padding: 12px 18px;
   background: #f5f5f5;
-  border: 1px solid #e5e5e5;
+  /* No border. Nothing on the main screen is framed, and a tile with a line
+     round it stops looking like a tile. */
   cursor: pointer;
   position: relative;
   z-index: 1;
   transition: transform 0.15s ease, background-color 0.15s ease;
 }
 
+/* Exactly what the main screen does: the same step up in size, and a deeper
+   shade of the tile's own colour rather than a different one. */
 .pack-row:hover {
-  transform: scale(1.02);
-  background: #ececec;
+  transform: scale(1.03);
+  background: #e0e0e0;
   z-index: 2;
 }
 
 /* The pack in use, in the same green the settings page marks a choice with. */
 .pack-row.current {
   background: #e8f3e9;
-  border-color: #cfe6d2;
 }
 
 .pack-row.current:hover {
-  background: #dcecdd;
+  background: #cfe6d2;
 }
 
 /* Playing without a pack is a choice of its own, not the absence of one. */

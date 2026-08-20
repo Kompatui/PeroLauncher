@@ -61,9 +61,53 @@ function countLabel(n) {
 
 // ---------------------------------------------------------------- pack list
 
+// The three things one can do with packs, along the bottom of the screen in a
+// row of their own. Pictures, not words: this is the same screen the main menu
+// is, and the main menu has no writing on it.
+const PLUS_ICON = `<svg viewBox="0 0 48 48" width="40" height="40" aria-hidden="true">
+  <line x1="24" y1="10" x2="24" y2="38" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+  <line x1="10" y1="24" x2="38" y2="24" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+</svg>`;
+
+const SEARCH_ICON = `<svg viewBox="0 0 48 48" width="38" height="38" aria-hidden="true">
+  <circle cx="21" cy="21" r="12" fill="none" stroke="currentColor" stroke-width="5"/>
+  <line x1="30" y1="30" x2="40" y2="40" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+</svg>`;
+
+// Stands in until the author's own picture is in place, the way the Esc key
+// does on the main screen. An empty tile would read as something broken.
+const IMPORT_ICON = `<svg viewBox="0 0 48 48" width="38" height="38" aria-hidden="true">
+  <line x1="24" y1="8" x2="24" y2="28" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+  <polyline points="14,20 24,30 34,20" fill="none" stroke="currentColor" stroke-width="5"
+            stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="10,34 10,40 38,40 38,34" fill="none" stroke="currentColor" stroke-width="5"
+            stroke-linecap="round" stroke-linejoin="round"/>
+</svg>`;
+
+const LIST_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+  <line x1="3" y1="6" x2="21" y2="6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="3" y1="18" x2="21" y2="18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+</svg>`;
+
+const GRID_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+  <rect x="3" y="3" width="8" height="8" fill="currentColor"/>
+  <rect x="13" y="3" width="8" height="8" fill="currentColor"/>
+  <rect x="3" y="13" width="8" height="8" fill="currentColor"/>
+  <rect x="13" y="13" width="8" height="8" fill="currentColor"/>
+</svg>`;
+
+// List or two across. Kept in the settings so the screen opens the way it was
+// left - a view that resets itself every time is a view nobody chooses twice.
+let packsView = 'list';
+
 async function showPacks() {
   goBack = () => { window.location.href = 'index.html'; };
+  page.className = 'packs-page flush';
+
   const store = await window.api.getInstances();
+  const settings = await window.api.getSettings();
+  packsView = settings.packsView === 'boxes' ? 'boxes' : 'list';
 
   const packs = store.instances.map(pack => `
     <div class="pack-row${pack.id === store.activeId ? ' current' : ''}" data-id="${escapeHtml(pack.id)}">
@@ -76,28 +120,50 @@ async function showPacks() {
   `).join('');
 
   page.innerHTML = `
-    <div class="packs-head">
+    <div class="packs-top">
       <h2>${t('packs.title')}</h2>
-      <p class="packs-note">${t('packs.explain')}</p>
+      <button class="view-tile" id="view-toggle" title="${t(packsView === 'boxes' ? 'packs.viewList' : 'packs.viewGrid')}">
+        ${packsView === 'boxes' ? LIST_ICON : GRID_ICON}
+      </button>
     </div>
 
-    <div class="pack-list">
-      <div class="pack-row plain${store.activeId ? '' : ' current'}" data-id="">
-        <span class="pack-main">
-          <span class="pack-name">${t('packs.noPack')}</span>
-          <span class="pack-meta">${t('packs.noPackHint')}</span>
-        </span>
-        ${store.activeId ? '' : `<span class="pack-badge">${t('packs.active')}</span>`}
+    <div class="pack-scroll">
+      <div class="pack-list ${packsView}">
+        <div class="pack-row plain${store.activeId ? '' : ' current'}" data-id="">
+          <span class="pack-main">
+            <span class="pack-name">${t('packs.noPack')}</span>
+            <span class="pack-meta">${t('packs.noPackHint')}</span>
+          </span>
+          ${store.activeId ? '' : `<span class="pack-badge">${t('packs.active')}</span>`}
+        </div>
+        ${packs}
       </div>
-      ${packs}
     </div>
 
-    <div class="pack-actions">
-      <button class="modal-btn" id="create-pack">${t('packs.create')}</button>
-      <button class="modal-btn" id="find-pack">${t('packs.findReady')}</button>
-      <button class="modal-btn" id="import-pack">${t('packs.importFile')}</button>
+    <div class="pack-dock">
+      <button class="dock-tile create" id="create-pack" title="${t('packs.create')}">${PLUS_ICON}</button>
+      <button class="dock-tile find" id="find-pack" title="${t('packs.findReady')}">${SEARCH_ICON}</button>
+      <button class="dock-tile import" id="import-pack" title="${t('packs.importFile')}">
+        <img src="assets/icons/import.png" alt="" id="import-icon">
+        <span class="dock-fallback hidden" id="import-fallback">${IMPORT_ICON}</span>
+      </button>
     </div>
   `;
+
+  // Until that picture exists, the drawn one takes its place.
+  const importIcon = document.getElementById('import-icon');
+  const useDrawnIcon = () => {
+    importIcon.classList.add('hidden');
+    document.getElementById('import-fallback').classList.remove('hidden');
+  };
+  importIcon.addEventListener('error', useDrawnIcon);
+  if (importIcon.complete && importIcon.naturalWidth === 0) useDrawnIcon();
+
+  document.getElementById('view-toggle').addEventListener('click', async () => {
+    settings.packsView = packsView === 'boxes' ? 'list' : 'boxes';
+    await window.api.saveSettings(settings);
+    showPacks();
+  });
 
   document.getElementById('create-pack').addEventListener('click', createPack);
   document.getElementById('find-pack').addEventListener('click', browseModpacks);
@@ -126,6 +192,7 @@ async function showPacks() {
 
 async function openPack(id) {
   goBack = showPacks;
+  page.className = 'packs-page';
   const store = await window.api.getInstances();
   const pack = store.instances.find(entry => entry.id === id);
   if (!pack) return showPacks();
@@ -262,6 +329,7 @@ function modCard(mod, alreadyIn) {
 // and a box in the middle of the screen was cutting the list in half.
 async function browseMods(pack, kind = 'mod') {
   goBack = () => openPack(pack.id);
+  page.className = 'packs-page';
   if (!Object.keys(CATEGORIES).length) CATEGORIES = await window.api.getModCategories();
 
   const installed = await window.api.listInstanceMods(pack.id, kind);
@@ -503,6 +571,7 @@ async function installPack(run, label) {
 
 async function browseModpacks() {
   goBack = showPacks;
+  page.className = 'packs-page';
   if (!Object.keys(CATEGORIES).length) CATEGORIES = await window.api.getModCategories();
 
   page.innerHTML = `

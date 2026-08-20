@@ -106,6 +106,8 @@
   "crash.retryWith": "Start with",
   "crash.giveUp": "Do not start",
   "packs.pageTitle": "Modpacks",
+  "packs.viewGrid": "Show as boxes",
+  "packs.viewList": "Show as a list",
   "packs.title": "Modpacks",
   "packs.explain": "A pack is a game of its own, with its own mods, settings and worlds. Its version and loader are chosen when it is made and answer for it from then on. Making one is optional: without a pack the launcher settings are in charge.",
   "packs.noPack": "No pack",

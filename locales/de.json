@@ -106,6 +106,8 @@
   "crash.retryWith": "Starten mit",
   "crash.giveUp": "Nicht starten",
   "packs.pageTitle": "Modpacks",
+  "packs.viewGrid": "Als Kacheln zeigen",
+  "packs.viewList": "Als Liste zeigen",
   "packs.title": "Modpacks",
   "packs.explain": "Ein Pack ist ein eigenes Spiel mit eigenen Mods, Einstellungen und Welten. Version und Loader werden beim Anlegen gewählt und gelten von da an. Man muss keines anlegen: ohne Pack bestimmen die Launcher-Einstellungen.",
   "packs.noPack": "Ohne Pack",

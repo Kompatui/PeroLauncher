@@ -698,9 +698,11 @@ ipcMain.handle('remove-instance-mod', (event, id, filename, kind) => {
 
 ipcMain.handle('get-mod-categories', () => modrinthCategories());
 
-ipcMain.handle('search-modpacks', async (event, query, offset, categories) => {
+ipcMain.handle('get-mod-game-versions', () => modrinthGameVersions());
+
+ipcMain.handle('search-modpacks', async (event, query, offset, categories, gameVersion) => {
   try {
-    return await searchModpacks(query, offset || 0, categories || []);
+    return await searchModpacks(query, offset || 0, categories || [], gameVersion || null);
   } catch (e) {
     return { error: e.message };
   }
@@ -1215,6 +1217,7 @@ function hasShaderLoader(instance) {
 // written down here - a list kept by hand drifts from the real one, and the
 // player is the one who finds out.
 const categoriesCachePath = 'E:\\PeroLauncher\\modrinth-categories.json';
+const gameVersionsCachePath = 'E:\\PeroLauncher\\modrinth-versions.json';
 
 async function modrinthCategories() {
   try {
@@ -1229,6 +1232,26 @@ async function modrinthCategories() {
       return JSON.parse(fs.readFileSync(categoriesCachePath, 'utf-8'));
     } catch {
       return {};
+    }
+  }
+}
+
+// The versions of the game the catalogue itself knows about, so the filter
+// offers exactly what a search can be narrowed by - names taken from anywhere
+// else would only agree with these by luck. Releases only: nobody looks for a
+// pack for a snapshot, and there are hundreds of them.
+async function modrinthGameVersions() {
+  try {
+    const tags = await fetchJson(`${MODRINTH}/tag/game_version`, { headers: MOD_API_HEADERS });
+    const releases = tags.filter(tag => tag.version_type === 'release').map(tag => tag.version);
+    fs.writeFileSync(gameVersionsCachePath, JSON.stringify(releases));
+    return releases;
+  } catch {
+    // Without them the filter is not shown; the catalogue itself still works.
+    try {
+      return JSON.parse(fs.readFileSync(gameVersionsCachePath, 'utf-8'));
+    } catch {
+      return [];
     }
   }
 }
@@ -1428,9 +1451,14 @@ function safeInside(folder, relative) {
 
 // Searching for whole packs rather than for pieces to put in one. Nothing is
 // filtered by version or loader here: a ready-made pack brings its own.
-async function searchModpacks(query, offset = 0, categories = []) {
+async function searchModpacks(query, offset = 0, categories = [], gameVersion = null) {
   const facets = [['project_type:modpack']];
   for (const category of categories) facets.push([`categories:${category}`]);
+
+  // A pack is made for a particular version of the game, and that is the first
+  // thing anyone narrows by: a wonderful pack for 1.21 is no use to somebody
+  // whose world is on 1.20.
+  if (gameVersion) facets.push([`versions:${gameVersion}`]);
 
   const url = `${MODRINTH}/search?limit=20&offset=${offset}` +
     `&query=${encodeURIComponent(query || '')}` +

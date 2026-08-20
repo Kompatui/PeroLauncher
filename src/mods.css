@@ -448,10 +448,14 @@
   color: #999;
 }
 
-/* The categories beside the results, as a catalogue does it. */
+/* The categories beside the results, as a catalogue does it.
+
+   minmax(0, ...) and not 1fr: a plain 1fr never becomes narrower than what is
+   inside it, and a pack called "COBBLEVERSE - Pokemon Adventure" made the
+   column wider than the window - the cards on the right ran off the edge. */
 .browse-body {
   display: grid;
-  grid-template-columns: 190px 1fr;
+  grid-template-columns: 190px minmax(0, 1fr);
   gap: 22px;
   align-items: start;
 }
@@ -512,16 +516,17 @@
    half a monitor stops looking like a card. */
 .mod-cards {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
+  min-width: 0;
 }
 
 @media (min-width: 780px) {
-  .mod-cards { grid-template-columns: repeat(2, 1fr); }
+  .mod-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (min-width: 1180px) {
-  .mod-cards { grid-template-columns: repeat(3, 1fr); }
+  .mod-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 /* Below this the categories sit above the results instead of stealing a
@@ -549,6 +554,9 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+  /* Long names wrap instead of pushing the card wider than its column. */
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: 16px;
   background: #fff;
   border: 1px solid #e7e7e7;
@@ -735,4 +743,25 @@
 .build-meta {
   font-size: 12px;
   color: #888;
+}
+
+/* The version of the game, above the categories: it is the first thing anyone
+   narrows a catalogue of packs by. A plain list to choose from - there are a
+   hundred versions, which is too many to lay out as rows of their own. */
+.version-filter {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  margin-bottom: 18px;
+  font-size: 14px;
+  font-family: inherit;
+  background: #f4f4f4;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  cursor: pointer;
+  outline: none;
+}
+
+.version-filter:focus {
+  border-color: #00af5c;
 }

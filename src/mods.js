@@ -305,6 +305,7 @@ function shortNumber(value) {
 // Filled from Modrinth's own list of categories, per kind of content, so it
 // cannot drift from the real one. Empty until it arrives.
 let CATEGORIES = {};
+let GAME_VERSIONS = [];
 
 // A slug the launcher knows becomes a word; one it does not is shown as it
 // came, which is better than hiding a category we have never heard of.
@@ -651,6 +652,7 @@ async function browseModpacks() {
   goBack = showPacks;
   page.className = 'packs-page';
   if (!Object.keys(CATEGORIES).length) CATEGORIES = await window.api.getModCategories();
+  if (!GAME_VERSIONS.length) GAME_VERSIONS = await window.api.getModGameVersions();
 
   page.innerHTML = `
     <div class="browse-head">
@@ -663,6 +665,16 @@ async function browseModpacks() {
 
     <div class="browse-body">
       <aside class="browse-filters">
+        <div class="filters-head">
+          <span class="filters-title">${t('packs.gameVersion')}</span>
+        </div>
+        <select class="version-filter" id="version-filter">
+          <option value="">${t('packs.anyVersion')}</option>
+          ${GAME_VERSIONS.map(version => `
+            <option value="${escapeHtml(version)}">${escapeHtml(version)}</option>
+          `).join('')}
+        </select>
+
         <div class="filters-head">
           <span class="filters-title">${t('packs.categories')}</span>
           <button class="link-btn hidden" id="clear-categories">${t('packs.clearCategories')}</button>
@@ -691,6 +703,12 @@ async function browseModpacks() {
   let round = 0;
   let query = '';
   let chosen = [];
+  let gameVersion = '';
+
+  document.getElementById('version-filter').addEventListener('change', (e) => {
+    gameVersion = e.target.value;
+    load(0);
+  });
 
   function readCategories() {
     chosen = [...page.querySelectorAll('.category-row input:checked')].map(box => box.value);
@@ -709,7 +727,7 @@ async function browseModpacks() {
     if (!offset) cards.innerHTML = `<p class="modal-note">${t('packs.searching')}</p>`;
     more.innerHTML = '';
 
-    const data = await window.api.searchModpacks(query, offset, chosen);
+    const data = await window.api.searchModpacks(query, offset, chosen, gameVersion);
     if (mine !== round) return;
 
     if (data.error) {

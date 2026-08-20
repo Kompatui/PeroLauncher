@@ -113,6 +113,8 @@
   "packs.noBuilds": "This pack has no published builds",
   "packs.buildAnyVersion": "No version given",
   "packs.buildNewest": "newest",
+  "packs.gameVersion": "Game version",
+  "packs.anyVersion": "Any version",
   "packs.title": "Modpacks",
   "packs.explain": "A pack is a game of its own, with its own mods, settings and worlds. Its version and loader are chosen when it is made and answer for it from then on. Making one is optional: without a pack the launcher settings are in charge.",
   "packs.noPack": "No pack",

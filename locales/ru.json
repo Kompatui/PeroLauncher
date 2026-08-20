@@ -85,6 +85,7 @@
   "modal.save": "Сохранить",
   "settings.open": "Открыть",
   "settings.logs": "Отчёты о падениях",
+  "settings.playerModel": "Модель игрока",
   "settings.onGameStart": "Когда игра запустилась",
   "onGameStart.minimize": "Свернуть лаунчер",
   "onGameStart.keep": "Оставить на экране",

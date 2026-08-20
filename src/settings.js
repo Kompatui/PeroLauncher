@@ -65,6 +65,10 @@ async function loadSettingsUI() {
   document.getElementById('win-h').value = settings.windowHeight;
   document.getElementById('win-fullscreen').checked = settings.fullscreen;
   updateWindowSizeDisabledState();
+
+  // Missing from a settings file written before this existed, and absent is
+  // not the same as off.
+  document.getElementById('player-model').checked = settings.playerModel !== false;
 }
 
 // Values that are either user data or a translated placeholder.
@@ -168,6 +172,11 @@ document.getElementById('win-h').addEventListener('change', async (e) => {
 document.getElementById('win-fullscreen').addEventListener('change', async (e) => {
   settings.fullscreen = e.target.checked;
   updateWindowSizeDisabledState();
+  await saveSettings();
+});
+
+document.getElementById('player-model').addEventListener('change', async (e) => {
+  settings.playerModel = e.target.checked;
   await saveSettings();
 });
 

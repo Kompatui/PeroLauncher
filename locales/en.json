@@ -85,6 +85,7 @@
   "modal.save": "Save",
   "settings.open": "Open",
   "settings.logs": "Crash reports",
+  "settings.playerModel": "Player model",
   "settings.onGameStart": "Once the game starts",
   "onGameStart.minimize": "Minimise the launcher",
   "onGameStart.keep": "Leave it on screen",

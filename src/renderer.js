@@ -230,32 +230,18 @@ window.addEventListener('keydown', (event) => {
 // that can manage.
 let viewer = null;
 
-// How many pixels the figure is allowed to take, counted in the screen's own
-// pixels. This is what the drawing costs - the graphics card is switched off
-// here and the processor works out every one of them, sixty times a second.
-// Filling the whole tile came to 1293x1000 with the window at full screen, and
-// the launcher spent most of a processor on a character standing still.
-//
-// It is a limit on size, not on sharpness: the figure is always drawn at the
-// screen's own pixels, never drawn small and stretched. Stretching is what
-// costs nothing and looks it - the picture goes pale and every slope turns
-// into a staircase.
-const PLAYER_MAX_PIXELS_WIDE = 560;
-const PLAYER_MAX_PIXELS_TALL = 770;
-
+// The figure gets the whole tile, drawn at the screen's own pixels and with
+// its edges smoothed. Every attempt to make it cheaper by drawing fewer pixels
+// was seen at once - a pale film over the character and staircases down every
+// slope - and it is the best-looking thing on the screen. What it costs is
+// real, so it can be switched off in the settings instead; half of it is not
+// worth having.
 function fitViewer() {
   if (!viewer) return;
 
   const tile = document.getElementById('tile-skin').getBoundingClientRect();
-  const ratio = window.devicePixelRatio || 1;
-
-  // The room there is for it: the whole tile, less a margin so the figure does
-  // not touch the edges - and no more than the budget above.
-  const width = Math.min(Math.max(80, tile.width - 36), PLAYER_MAX_PIXELS_WIDE / ratio);
-  const height = Math.min(Math.max(80, tile.height - 36), PLAYER_MAX_PIXELS_TALL / ratio);
-
-  viewer.pixelRatio = ratio;
-  viewer.setSize(width, height);
+  // The whole tile, less a margin so the figure does not touch the edges.
+  viewer.setSize(Math.max(80, tile.width - 36), Math.max(80, tile.height - 36));
 }
 
 // When the figure is worth drawing. Not while the game is in front or the
@@ -276,6 +262,7 @@ window.addEventListener('blur', updateDrawing);
 
 async function showPlayer() {
   const player = await window.api.getPlayer();
+  const settings = await window.api.getSettings();
   const name = document.getElementById('player-name');
   const canvas = document.getElementById('player-body');
 
@@ -289,21 +276,21 @@ async function showPlayer() {
     return;
   }
 
+  // Turned off in the settings. Nothing is created, so nothing is drawn and
+  // nothing is paid for. The tile is left empty on purpose - what stands there
+  // instead is still to be decided; it opens the account list either way.
+  if (settings.playerModel === false) {
+    name.classList.add('hidden');
+    canvas.classList.add('hidden');
+    return;
+  }
+
   name.classList.add('hidden');
   canvas.classList.remove('hidden');
 
   if (!viewer) {
     viewer = new skinview3d.SkinViewer({ canvas, width: 200, height: 260 });
 
-    // No edge smoothing. Measured, it costs more than doubling the resolution
-    // does - 44% of this machine against 21% - and it is the resolution that
-    // decides how the figure looks. Drawn at the screen's own pixels there is
-    // a pixel of jaggedness left on the slopes; drawn smaller and stretched,
-    // with the smoothing on, the steps were three times the size and the whole
-    // figure went pale.
-    if (viewer.composer && viewer.fxaaPass && viewer.composer.removePass) {
-      viewer.composer.removePass(viewer.fxaaPass);
-    }
 
     // Turning it is worth having; wheeling it closer and further is not, and
     // would only fight with the scroll on the page.

@@ -85,6 +85,7 @@
   "modal.save": "Speichern",
   "settings.open": "Öffnen",
   "settings.logs": "Absturzberichte",
+  "settings.playerModel": "Spielerfigur",
   "settings.onGameStart": "Sobald das Spiel startet",
   "onGameStart.minimize": "Launcher minimieren",
   "onGameStart.keep": "Auf dem Bildschirm lassen",

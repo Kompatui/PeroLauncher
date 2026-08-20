@@ -45,6 +45,11 @@ const defaultSettings = {
   // What the launcher does with itself once the game is up: get out of the
   // way, stay put, or quit. Minimising is what a launcher is expected to do.
   onGameStart: 'minimize',
+  // The character on the white tile, drawn in three dimensions. It is the one
+  // thing here that costs anything to have on screen - the graphics card is no
+  // help on a machine where it has to be switched off - so it can be turned
+  // off. On, because it is the nicest thing on the screen.
+  playerModel: true,
   versionFilters: {
     loadFromServer: true,
     mods: true,

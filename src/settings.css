@@ -121,6 +121,14 @@
   padding: 5px;
 }
 
+/* A switch on its own in the right of a cell. The default one is drawn small
+   enough to look like an afterthought next to the rest of the page. */
+.settings-switch {
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+}
+
 .auto-label {
   display: flex;
   align-items: center;

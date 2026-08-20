@@ -64,6 +64,7 @@ body { font-family: sans-serif; overflow: hidden; }
   grid-template-columns: 1fr 1fr 1fr;
   grid-template-rows: 1fr 1fr;
   height: calc(100vh - 40px);
+  position: relative;
 }
 
 .tile {
@@ -190,27 +191,23 @@ body { font-family: sans-serif; overflow: hidden; }
   background: rgba(255, 255, 255, 0.16);
 }
 
-/* Takes the place of the play tile from the moment a launch starts until the
-   game is over. One control at a time, in the same spot: never a play button
-   and a cancel button on screen together, and never one button meaning
-   different things depending on a variable. */
+/* The play tile is column three, both rows. While a launch is happening these
+   two stand in its place: the cancel tile on top, the progress tile below. */
+.tile.hidden {
+  display: none;
+}
+
 .launch-panel {
-  position: absolute;
-  inset: 0;
-  z-index: 3;
+  grid-column: 3;
+  grid-row: 1 / 3;
+  min-width: 0;
   /* Deeper than the mods tile beside it. At the same pastel red the two read
-     as one pair of red tiles rather than a tile and the thing covering it. */
+     as a pair of red tiles rather than as the thing that replaced play. */
   background: #e03131;
   color: #fff;
   border: none;
   font-family: inherit;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
   padding: 0;
-  box-sizing: border-box;
-  cursor: pointer;
-  transition: background-color 0.15s ease;
 }
 
 .launch-panel:hover {
@@ -225,11 +222,35 @@ body { font-family: sans-serif; overflow: hidden; }
 
 .launch-panel.waiting:hover {
   background: #2f9e44;
+  transform: none;
+}
+
+/* A strip of its own along the bottom of the column, not half of it. It sits
+   outside the cancel tile so nothing can grow over it or carry it off the
+   edge, which is what happened when it lived inside a tile that lifts. */
+.launch-progress {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: calc(100% / 3);
+  height: 58px;
+  z-index: 4;
+  background: #e8e8e8;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-bottom: 0;
+  cursor: default;
+  min-width: 0;
+}
+
+.launch-progress:hover {
+  background: #d9d9d9;
+  transform: none;
 }
 
 /* The cross sits where the play arrow sat, in the middle of the tile. */
 .launch-cross {
-  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -240,41 +261,26 @@ body { font-family: sans-serif; overflow: hidden; }
   display: none;
 }
 
-/* And the words stay along the bottom edge, where they were before. */
-.launch-foot {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  /* No padding at the sides: the bar runs the full width of the tile, edge to
-     edge, the way a strip along the bottom should. */
-  padding: 10px 0 0;
-  background: rgba(0, 0, 0, 0.12);
-}
-
-/* With no cross above it there is nothing to push it down, so it holds the
-   bottom on its own. */
-.launch-panel.waiting .launch-foot {
-  margin-top: auto;
-}
-
 .launch-panel.hidden {
   display: none;
 }
 
 .launch-text {
   font-size: 14px;
-  color: rgba(255, 255, 255, 0.95);
+  color: #555;
   text-align: center;
   padding: 0 12px;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* Edge to edge along the bottom of its own tile. */
 .launch-bar {
   width: 100%;
-  height: 6px;
-  background: rgba(0, 0, 0, 0.22);
+  height: 8px;
+  background: rgba(0, 0, 0, 0.14);
   overflow: hidden;
 }
 
@@ -282,7 +288,7 @@ body { font-family: sans-serif; overflow: hidden; }
   display: block;
   height: 100%;
   width: 0;
-  background: rgba(255, 255, 255, 0.9);
+  background: #2f9e44;
   transition: width 0.25s ease;
 }
 
@@ -290,7 +296,7 @@ body { font-family: sans-serif; overflow: hidden; }
    where an empty one would say "stuck". */
 .launch-fill.working {
   width: 100%;
-  background: linear-gradient(90deg, rgba(0,0,0,0.06) 25%, rgba(122,20,20,0.65) 50%, rgba(0,0,0,0.06) 75%);
+  background: linear-gradient(90deg, rgba(0,0,0,0.06) 25%, rgba(47,158,68,0.75) 50%, rgba(0,0,0,0.06) 75%);
   background-size: 200% 100%;
   animation: launch-sweep 1.4s linear infinite;
 }
@@ -298,26 +304,6 @@ body { font-family: sans-serif; overflow: hidden; }
 @keyframes launch-sweep {
   from { background-position: 200% 0; }
   to   { background-position: 0 0; }
-}
-
-.launch-cancel {
-  padding: 9px 22px;
-  border: none;
-  border-radius: 4px;
-  background: #7a1414;
-  color: #fff;
-  font-size: 15px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background-color 0.15s ease;
-}
-
-.launch-cancel:hover {
-  background: #5c1010;
-}
-
-.launch-cancel.hidden {
-  display: none;
 }
 
 .yellow img { width: 60%; }

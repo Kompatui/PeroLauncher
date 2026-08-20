@@ -4,6 +4,7 @@ document.getElementById('btn-close').addEventListener('click', () => window.api.
 
 const playTile = document.getElementById('tile-play');
 const launchPanel = document.getElementById('launch-panel');
+const launchProgress = document.getElementById('launch-progress');
 const launchText = document.getElementById('launch-text');
 const launchFill = document.getElementById('launch-fill');
 const launchCross = document.getElementById('launch-cross');
@@ -22,16 +23,20 @@ function showPanel(text, fraction, canCancel) {
   launchFill.classList.toggle('working', fraction === null);
 
   // Once the game is up there is nothing to call off, so the cross goes and
-  // the panel stops being a button - it is only telling you something then.
+  // the tile stops being a button - it is only telling you something then.
   launchCross.classList.toggle('hidden', !canCancel);
   launchPanel.classList.toggle('waiting', !canCancel);
   launchPanel.disabled = !canCancel;
 
+  playTile.classList.add('hidden');
   launchPanel.classList.remove('hidden');
+  launchProgress.classList.remove('hidden');
 }
 
 function hidePanel() {
   launchPanel.classList.add('hidden');
+  launchProgress.classList.add('hidden');
+  playTile.classList.remove('hidden');
 }
 
 // The whole panel is the button. Nothing here starts anything: it can only

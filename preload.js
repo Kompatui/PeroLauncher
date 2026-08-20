@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('api', {
   close: () => ipcRenderer.send('window-close'),
   loginMicrosoft: () => ipcRenderer.invoke('login-microsoft'),
   addOfflineAccount: (name) => ipcRenderer.invoke('add-offline-account', name),
+  getPlayer: () => ipcRenderer.invoke('get-player'),
   getAccounts: () => ipcRenderer.invoke('get-accounts'),
   setActiveAccount: (id) => ipcRenderer.invoke('set-active-account', id),
   removeAccount: (id) => ipcRenderer.invoke('remove-account', id),

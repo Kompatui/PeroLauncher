@@ -45,7 +45,12 @@
       <span class="launch-bar"><span class="launch-fill" id="launch-fill"></span></span>
     </div>
     <div class="tile grey" id="tile-settings"><img src="assets/icons/settings.png" alt=""></div>
-    <div class="tile white" id="tile-skin"><img src="assets/icons/skin.png" alt=""></div>
+    <div class="tile white" id="tile-skin">
+      <div class="player" id="player">
+        <canvas class="player-body" id="player-body"></canvas>
+        <span class="player-name" id="player-name"></span>
+      </div>
+    </div>
   </div>
 
   <div class="bluescreen hidden" id="bluescreen">
@@ -61,6 +66,7 @@
     </div>
   </div>
 
+  <script src="node_modules/skinview3d/bundles/skinview3d.bundle.js"></script>
   <script src="src/i18n.js"></script>
   <script src="src/renderer.js"></script>
 </body>

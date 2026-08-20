@@ -244,5 +244,6 @@
   "launch.cancelling": "Cancelling…",
   "bluescreen.continue": "Continue",
   "launch.running": "The game is running",
-  "launch.cancel": "Cancel"
+  "launch.cancel": "Cancel",
+  "player.nobody": "Nobody signed in"
 }

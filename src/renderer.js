@@ -152,6 +152,76 @@ playTile.addEventListener('click', async () => {
   }
 });
 
+// ------------------------------------------------------------- the player
+
+// The character in three dimensions, turned by dragging. This machine runs
+// with hardware acceleration off - the graphics process crashes on it - so the
+// drawing is done in software; one figure of a dozen boxes is well within what
+// that can manage.
+let viewer = null;
+
+function fitViewer() {
+  if (!viewer) return;
+
+  const tile = document.getElementById('tile-skin').getBoundingClientRect();
+  // Room left underneath for the name.
+  viewer.setSize(Math.max(80, tile.width - 40), Math.max(80, tile.height - 70));
+}
+
+async function showPlayer() {
+  const player = await window.api.getPlayer();
+  const name = document.getElementById('player-name');
+  const canvas = document.getElementById('player-body');
+
+  // Nobody signed in: the tile says so rather than standing empty.
+  if (!player || !player.image) {
+    name.textContent = player ? player.name : t('player.nobody');
+    canvas.classList.add('hidden');
+    return;
+  }
+
+  name.textContent = player.name;
+  canvas.classList.remove('hidden');
+
+  if (!viewer) {
+    viewer = new skinview3d.SkinViewer({ canvas, width: 200, height: 260 });
+
+    // Turning it is worth having; wheeling it closer and further is not, and
+    // would only fight with the scroll on the page.
+    viewer.controls.enableZoom = false;
+    viewer.controls.enablePan = false;
+
+    // Standing and breathing rather than posing: it is a launcher tile, not a
+    // dance floor.
+    viewer.animation = new skinview3d.IdleAnimation();
+    viewer.zoom = 0.85;
+  }
+
+  await viewer.loadSkin(player.image, { model: player.model });
+  if (player.cape) await viewer.loadCape(player.cape);
+  else viewer.resetCape();
+
+  fitViewer();
+}
+
+window.addEventListener('resize', fitViewer);
+
+// Dragging the figure turns it, so a drag must not be taken for a click on the
+// tile and send the player off to the account list.
+let dragged = false;
+document.getElementById('player-body').addEventListener('pointerdown', () => { dragged = false; });
+document.getElementById('player-body').addEventListener('pointermove', (e) => {
+  if (e.buttons) dragged = true;
+});
+
+// The tile is about who is playing, so it opens the list of accounts.
+document.getElementById('tile-skin').addEventListener('click', () => {
+  if (dragged) return;
+  window.location.href = 'settings.html#accounts';
+});
+
+translationsReady.then(showPlayer);
+
 document.getElementById('tile-folder').addEventListener('click', () => {
   window.api.openGameFolder();
 });

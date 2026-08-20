@@ -244,5 +244,6 @@
   "launch.cancelling": "Wird abgebrochen…",
   "bluescreen.continue": "Fortfahren",
   "launch.running": "Das Spiel läuft",
-  "launch.cancel": "Abbrechen"
+  "launch.cancel": "Abbrechen",
+  "player.nobody": "Niemand angemeldet"
 }

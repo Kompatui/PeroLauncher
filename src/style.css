@@ -102,6 +102,40 @@ body { font-family: sans-serif; overflow: hidden; }
   object-fit: contain;
 }
 
+/* The player, drawn from their own skin. */
+.player {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 100%;
+  padding: 12px;
+  box-sizing: border-box;
+}
+
+/* The viewer sets the canvas size itself, to the room the tile has. */
+.player-body {
+  cursor: grab;
+}
+
+.player-body:active {
+  cursor: grabbing;
+}
+
+.player-body.hidden {
+  display: none;
+}
+
+.player-name {
+  font-size: 15px;
+  color: #444;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* When a launch fails the whole launcher becomes the message. Everyone knows
    this screen on sight, and knowing at a glance that something went wrong is
    the entire job - the small print underneath says what and what to do. */

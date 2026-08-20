@@ -17,6 +17,7 @@
   "dependencies": {
     "adm-zip": "^0.4.16",
     "minecraft-launcher-core": "^3.18.2",
-    "msmc": "^4.1.0"
+    "msmc": "^4.1.0",
+    "skinview3d": "^3.4.2"
   }
 }

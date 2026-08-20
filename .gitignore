@@ -13,6 +13,8 @@ accounts.json
 # The player's own modpacks - their mods, configs and worlds.
 instances.json
 instances/
+# The CurseForge API key. A secret, and tied to a person's account.
+secrets.json
 versions-cache.json
 java-versions.json
 

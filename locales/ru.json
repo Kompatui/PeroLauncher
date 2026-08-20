@@ -244,5 +244,6 @@
   "launch.cancelling": "Отменяю…",
   "bluescreen.continue": "Продолжить",
   "launch.running": "Игра запущена",
-  "launch.cancel": "Отменить"
+  "launch.cancel": "Отменить",
+  "player.nobody": "Не выполнен вход"
 }

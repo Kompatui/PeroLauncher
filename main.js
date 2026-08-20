@@ -427,6 +427,109 @@ ipcMain.handle('add-offline-account', (event, rawName) => {
   return { ok: true, store: publicAccounts(store) };
 });
 
+// Skins are kept once they are fetched, so the main screen has a face to show
+// the moment it opens and keeps one when the connection is down.
+const skinsDir = 'E:\\PeroLauncher\\skins';
+
+// The two skins Minecraft hands out to anyone who has not set one. Which of
+// them a player gets is decided by their id, and this is the same arithmetic
+// the game does, so an offline player sees the character they will actually
+// be playing as.
+const DEFAULT_SKINS = {
+  classic: 'http://textures.minecraft.net/texture/1a4af718455d4aab528e7a61f86fa25e6a369d1768dcb13f7df319a713eb810b',
+  slim: 'http://textures.minecraft.net/texture/83cee5ca6afcdb171285aa00e8049c297b2dbeba0efb8ff970a5677a1b644032'
+};
+
+function defaultSkinFor(uuid) {
+  const hex = uuid.replace(/-/g, '');
+  // Java's UUID.hashCode(), folded down from the two halves.
+  const most = BigInt('0x' + hex.slice(0, 16));
+  const least = BigInt('0x' + hex.slice(16));
+  const folded = (most ^ (most >> 32n) ^ least ^ (least >> 32n)) & 0xffffffffn;
+  return (folded & 1n) === 1n ? 'slim' : 'classic';
+}
+
+// What the sessionserver has on file for this player. Answers 204 - no body at
+// all - for anyone it has never heard of, which is every offline account.
+async function skinFromMojang(uuid) {
+  const response = await fetchWithRetry(
+    `https://sessionserver.mojang.com/session/minecraft/profile/${uuid.replace(/-/g, '')}`);
+  if (response.status === 204) return null;
+
+  const data = await response.json();
+  const property = (data.properties || []).find(entry => entry.name === 'textures');
+  if (!property) return null;
+
+  const textures = JSON.parse(Buffer.from(property.value, 'base64').toString('utf-8'));
+  const skin = textures.textures?.SKIN;
+  if (!skin?.url) return null;
+
+  return {
+    url: skin.url,
+    model: skin.metadata?.model === 'slim' ? 'slim' : 'classic',
+    // Worth having: a cape is something a player earned or was given, and
+    // leaving it off would show them as someone slightly less than they are.
+    cape: textures.textures?.CAPE?.url || null
+  };
+}
+
+// Fetched once and kept, so the figure appears immediately next time and
+// still appears when the connection is down.
+async function cachedImage(url) {
+  fs.mkdirSync(skinsDir, { recursive: true });
+  const file = path.join(skinsDir, crypto.createHash('sha1').update(url).digest('hex') + '.png');
+
+  if (!fs.existsSync(file)) fs.writeFileSync(file, await fetchBuffer(url));
+  return `data:image/png;base64,${fs.readFileSync(file).toString('base64')}`;
+}
+
+async function playerSkin(account) {
+  let source = null;
+
+  if ((account.type || 'microsoft') === 'microsoft') {
+    try {
+      source = await skinFromMojang(account.uuid);
+    } catch (e) {
+      console.log('[SKIN] could not ask about', account.name + ':', e.message);
+    }
+  }
+
+  // Nobody has a skin on file for an offline account, and there is nothing
+  // wrong with that - the game gives them one of the two defaults.
+  if (!source) {
+    const model = defaultSkinFor(account.uuid);
+    source = { url: DEFAULT_SKINS[model], model, isDefault: true };
+  }
+
+  return {
+    model: source.model,
+    isDefault: !!source.isDefault,
+    image: await cachedImage(source.url),
+    cape: source.cape ? await cachedImage(source.cape) : null
+  };
+}
+
+// Who is playing, and what they look like. Null when nobody is signed in -
+// the screen then invites them to be, rather than showing an empty frame.
+ipcMain.handle('get-player', async () => {
+  const store = loadAccounts();
+  const account = store.accounts.find(entry => entry.id === store.activeId);
+  if (!account) return null;
+
+  const player = {
+    name: account.name,
+    uuid: account.uuid,
+    offline: (account.type || 'microsoft') === 'offline'
+  };
+
+  try {
+    return { ...player, ...await playerSkin(account) };
+  } catch (e) {
+    console.log('[SKIN] could not fetch a skin:', e.message);
+    return { ...player, image: null, model: 'classic', isDefault: true };
+  }
+});
+
 ipcMain.handle('get-accounts', () => publicAccounts(loadAccounts()));
 
 ipcMain.handle('set-active-account', (event, id) => {

@@ -244,6 +244,7 @@
   "launch.java": "Checking Java…",
   "launch.loader": "Installing the loader…",
   "launch.files": "Downloading files",
+  "launch.checking": "Checking the game files",
   "launch.failedTitle": "The game did not start",
   "launch.failed.java": "Java could not be prepared",
   "launch.failed.loader": "The mod loader could not be installed",

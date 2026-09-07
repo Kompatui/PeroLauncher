@@ -11,7 +11,69 @@
 // doing, and stops when told to.
 
 const { Client } = require('minecraft-launcher-core');
+const Handler = require('minecraft-launcher-core/components/handler');
 const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+// minecraft-launcher-core reads and hashes every asset on every launch - 4591
+// files and 431 MB for 1.21.11 - even when there is nothing to fetch. Measured
+// here at 33 seconds, and the screen called it downloading, which sent the
+// player looking for a connection problem that did not exist.
+//
+// Every file the library writes is hash-checked as it is written. So what is
+// worth asking on the next launch is not "is this the right file" but "is it
+// still there, and still whole". That is a stat instead of a read: the same
+// 4591 files in under half a second, and a truncated one is still caught,
+// because a truncated file is the wrong size.
+//
+// Anything missing or the wrong size and the library's own pass runs in full
+// and fetches exactly what is needed. Nothing is skipped that matters - only
+// the reading of hundreds of megabytes to be told what we already knew.
+const libraryAssetCheck = Handler.prototype.getAssets;
+
+Handler.prototype.getAssets = async function () {
+  const assetDirectory = path.resolve(
+    this.options.overrides.assetRoot || path.join(this.options.root, 'assets'));
+  const assetId = this.options.version.custom || this.options.version.number;
+  const indexPath = path.join(assetDirectory, 'indexes', `${assetId}.json`);
+
+  // Versions before 1.6 also need their assets copied out into resources/,
+  // which is the library's business and not worth reproducing here.
+  if (this.isLegacy() || !fs.existsSync(indexPath)) return libraryAssetCheck.call(this);
+
+  let objects;
+  try {
+    objects = Object.values(JSON.parse(fs.readFileSync(indexPath, 'utf8')).objects || {});
+  } catch {
+    return libraryAssetCheck.call(this);
+  }
+
+  const total = objects.length;
+  if (!total) return libraryAssetCheck.call(this);
+
+  this.client.emit('progress', { type: 'assets', task: 0, total });
+
+  let checked = 0;
+  for (const object of objects) {
+    const file = path.join(assetDirectory, 'objects', object.hash.substring(0, 2), object.hash);
+    let stat = null;
+    try {
+      stat = fs.statSync(file);
+    } catch {}
+
+    if (!stat || stat.size !== object.size) {
+      this.client.emit('debug', '[pero]: something is missing from the assets - full check');
+      return libraryAssetCheck.call(this);
+    }
+
+    checked++;
+    if (checked % 500 === 0) this.client.emit('progress', { type: 'assets', task: checked, total });
+  }
+
+  this.client.emit('progress', { type: 'assets', task: total, total });
+  this.client.emit('debug', `[pero]: ${total} assets already in place, nothing to fetch`);
+};
 
 let child = null;
 let stopped = false;
@@ -52,9 +114,20 @@ process.parentPort.on('message', event => {
 
   const launcher = new Client();
 
+  // Whether anything is actually coming down the wire. The library reports the
+  // same progress whether it is fetching a file or looking at one it already
+  // has, and calling both of them downloading is simply untrue - most launches
+  // fetch nothing at all.
+  let lastDownloadAt = 0;
+  launcher.on('download-status', () => { lastDownloadAt = Date.now(); });
+
   launcher.on('debug', line => send({ type: 'debug', line: String(line) }));
   launcher.on('data', line => send({ type: 'data', line: String(line) }));
-  launcher.on('progress', progress => send({ type: 'progress', progress }));
+  launcher.on('progress', progress => send({
+    type: 'progress',
+    progress,
+    downloading: Date.now() - lastDownloadAt < 2000
+  }));
   launcher.on('close', code => send({ type: 'close', code }));
 
   launcher.launch(message.opts)

@@ -1498,7 +1498,12 @@ async function startGame(profile, ramOverride) {
       if (!finished && Date.now() - lastSaid < 150) return;
 
       lastSaid = Date.now();
-      return say('files', { type: e.type, done: e.task, total: e.total });
+      return say('files', {
+        type: e.type,
+        done: e.task,
+        total: e.total,
+        checking: !message.downloading
+      });
     }
 
     if (message.type === 'started') {

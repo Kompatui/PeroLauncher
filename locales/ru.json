@@ -244,6 +244,7 @@
   "launch.java": "Проверяю Java…",
   "launch.loader": "Ставлю загрузчик…",
   "launch.files": "Скачиваю файлы",
+  "launch.checking": "Проверяю файлы игры",
   "launch.failedTitle": "Запустить не удалось",
   "launch.failed.java": "Не удалось подготовить Java",
   "launch.failed.loader": "Не удалось поставить загрузчик модов",

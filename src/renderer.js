@@ -144,7 +144,8 @@ window.api.onLaunchProgress(progress => {
   if (progress.stage === 'loader') showPanel(t('launch.loader'), null, true);
 
   if (progress.stage === 'files') {
-    const named = progress.type ? `${t('launch.files')} — ${progress.type}` : t('launch.files');
+    const what = progress.checking ? t('launch.checking') : t('launch.files');
+    const named = progress.type ? `${what} — ${progress.type}` : what;
     showPanel(progress.total ? `${named} ${progress.done}/${progress.total}` : named,
       progress.total ? progress.done / progress.total : null, true);
   }

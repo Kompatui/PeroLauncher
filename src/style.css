@@ -348,9 +348,18 @@ body { font-family: sans-serif; overflow: hidden; }
   text-align: center;
   padding: 0 12px;
   max-width: 100%;
+  /* Two lines rather than one cut short. In a narrow window the line does not
+     fit across, and half a sentence followed by an ellipsis says less than the
+     whole of it on two lines. Two is the limit: a third would push the bar
+     off its own strip. */
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* A single long word - a version name, a pack name - breaks rather than
+     hangs over the edge. */
+  overflow-wrap: anywhere;
 }
 
 /* Edge to edge along the bottom of its own tile. */

@@ -145,7 +145,9 @@ window.api.onLaunchProgress(progress => {
 
   if (progress.stage === 'files') {
     const what = progress.checking ? t('launch.checking') : t('launch.files');
-    const named = progress.type ? `${what} — ${progress.type}` : what;
+    // The dash is tied to what follows it, so a wrap puts it at the head of
+    // the second line instead of leaving it hanging at the end of the first.
+    const named = progress.type ? `${what} \u2014\u00A0${progress.type}` : what;
     showPanel(progress.total ? `${named} ${progress.done}/${progress.total}` : named,
       progress.total ? progress.done / progress.total : null, true);
   }

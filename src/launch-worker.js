@@ -16,6 +16,42 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
+// The library pipes a download straight into a file and calls it done when the
+// stream ends - which it also does when a connection drops halfway. Nothing is
+// checked afterwards, so a truncated jar is written as though it were whole.
+//
+// An archive says where it ends. If the one we just wrote does not, it was cut
+// short: throw it away and ask once more. Only archives are looked at - assets
+// are named by their own hash and the library does check those.
+const libraryDownload = Handler.prototype.downloadAsync;
+
+Handler.prototype.downloadAsync = async function (url, directory, name, retry, type) {
+  const result = await libraryDownload.call(this, url, directory, name, retry, type);
+  if (!/\.(jar|zip)$/i.test(name)) return result;
+
+  const file = path.join(directory, name);
+  if (!fs.existsSync(file) || !truncatedArchive(file)) return result;
+
+  this.client.emit('debug', `[pero]: ${name} arrived cut short - fetching it again`);
+  fs.rmSync(file, { force: true });
+  return libraryDownload.call(this, url, directory, name, false, type);
+};
+
+function truncatedArchive(file) {
+  try {
+    const size = fs.statSync(file).size;
+    if (!size) return true;
+    const length = Math.min(size, 66000);
+    const buffer = Buffer.alloc(length);
+    const handle = fs.openSync(file, 'r');
+    fs.readSync(handle, buffer, 0, length, size - length);
+    fs.closeSync(handle);
+    return buffer.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06])) === -1;
+  } catch {
+    return false;
+  }
+}
+
 // minecraft-launcher-core reads and hashes every asset on every launch - 4591
 // files and 431 MB for 1.21.11 - even when there is nothing to fetch. Measured
 // here at 33 seconds, and the screen called it downloading, which sent the

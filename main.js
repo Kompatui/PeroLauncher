@@ -298,6 +298,13 @@ function packFileDestination(instance, relativePath) {
 // assets are the same file by construction and one of them is waste, while two
 // worlds named "New World" are two different worlds and losing one is losing
 // somebody's evenings.
+// Of two files under the same name, the shorter one is the one that was cut
+// short. A size that cannot be read is treated as no file at all.
+function biggerOf(one, other) {
+  const size = file => { try { return fs.statSync(file).size; } catch { return -1; } };
+  return size(one) > size(other) ? one : other;
+}
+
 function mergeFolder(from, to, onCollision = 'keep') {
   if (!fs.existsSync(from)) return;
 
@@ -326,8 +333,18 @@ function mergeFolder(from, to, onCollision = 'keep') {
         }
         // A file already there is either the same file (drop the spare) or one
         // we were told not to touch (leave ours where it is, in plain sight).
-        if (onCollision === 'drop') fs.rmSync(source, { force: true });
-        continue;
+        //
+        // "The same file" was taken on trust, by name alone, and that was too
+        // much trust: a download cut short keeps its name and loses its tail.
+        // Two files under one name in versions or libraries are the same file
+        // or one of them is damaged, and the damaged one is the shorter one.
+        // Keep the longer, and never delete the only whole copy.
+        if (onCollision === 'drop') {
+          if (biggerOf(source, target) === source) fs.rmSync(target, { force: true });
+          else { fs.rmSync(source, { force: true }); continue; }
+        } else {
+          continue;
+        }
       }
 
       // Told to keep both. Whatever this is - a world, a resource pack - it is
@@ -1330,6 +1347,10 @@ async function startGame(profile, ramOverride) {
 
   const effectiveRam = ramOverride || (settings.ramAuto && !pack?.ram ? autoRamMB() : settings.ram);
 
+  // Set where the launcher puts the game together itself rather than fetching
+  // it - jar mods, which cannot be downloaded from anywhere.
+  let builtJarLocally = false;
+
   const opts = {
     authorization: profile.mclc,
     root: settings.gameFolder,
@@ -1373,6 +1394,7 @@ async function startGame(profile, ramOverride) {
           settings.loader, settings.version, settings.loaderVersion, settings.gameFolder
         );
       } else if (kind === 'jarmod') {
+        builtJarLocally = true;
         opts.version.custom = await loader.installJarMod(
           settings.version, settings.loaderVersion, settings.gameFolder
         );
@@ -1425,6 +1447,7 @@ async function startGame(profile, ramOverride) {
     // No loader picked, but the player has put jar mods in place - on these
     // versions that is how mods were installed, loader or not.
     try {
+      builtJarLocally = true;
       opts.version.custom = await installLegacyProfile(
         settings.version, settings.gameFolder, `${settings.version}-jarmod`, null
       );
@@ -1467,6 +1490,13 @@ async function startGame(profile, ramOverride) {
   // Nothing has been fetched at this point and nothing has even been looked at
   // yet - the next thing that happens is the looking. Saying "downloading" here
   // was the same untruth as saying it during the checks, only a second earlier.
+  // A jar the launcher built itself is left alone: it is not something the
+  // library can fetch, and removing it would only get a plain one written over
+  // the top of a game that was assembled on purpose.
+  if (!builtJarLocally) {
+    discardBrokenVersionJar(settings.gameFolder, opts.version.custom || settings.version);
+  }
+
   say('files', { type: '', done: 0, total: 0, checking: true });
 
   // Handed to a process of its own. Doing it here meant the window stopped
@@ -2236,6 +2266,44 @@ ipcMain.handle('reveal-crash-report', (event, id) => {
 // real thing: the process died so fast that "Could not create the Java
 // Virtual Machine" never reached us, and the player got a bare exit code for
 // a problem the launcher could have fixed in one click.
+// A zip ends with a record naming where its table of contents starts. No such
+// record, no zip: the file was cut short. Only the tail is read, because that
+// is where the record lives - the end plus room for a comment.
+function looksTruncated(file) {
+  try {
+    const size = fs.statSync(file).size;
+    if (!size) return true;
+    const length = Math.min(size, 66000);
+    const buffer = Buffer.alloc(length);
+    const handle = fs.openSync(file, 'r');
+    fs.readSync(handle, buffer, 0, length, size - length);
+    fs.closeSync(handle);
+    return buffer.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06])) === -1;
+  } catch {
+    // Unreadable is not the same as cut short, and guessing here would delete
+    // a file over a locked handle.
+    return false;
+  }
+}
+
+// minecraft-launcher-core writes a download with no check of any kind - not a
+// hash, not even the length it was promised - and afterwards only ever asks
+// whether the file exists. So a download cut short by a dropped connection is
+// left looking complete and is never fetched again: the game dies on it with a
+// Java stack trace, at every launch, for good.
+//
+// Found exactly that here - 7.4 MB of a jar with no end to it, sitting since
+// August, and Fabric refusing to start on "zip END header not found". Removing
+// it is all it takes: the library fetches what is missing.
+function discardBrokenVersionJar(gameFolder, versionId) {
+  const jar = path.join(gameFolder, 'versions', versionId, `${versionId}.jar`);
+  if (!fs.existsSync(jar) || !looksTruncated(jar)) return false;
+
+  console.log('[LAUNCH] the game jar is cut short, removing so it is fetched again:', jar);
+  fs.rmSync(jar, { force: true });
+  return true;
+}
+
 function heapTooBigToStart(output) {
   const failedToStart = /Error occurred during initialization of VM|Could not create the Java Virtual Machine/i.test(output);
   const aboutMemory = /Unable to allocate|Could not reserve enough space|insufficient memory|Failed to allocate|object heap/i.test(output);

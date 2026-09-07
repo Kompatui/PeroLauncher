@@ -18,15 +18,69 @@ app.disableHardwareAcceleration();
 // Set from settings.json at startup, see below - the file is read there.
 let currentLocale = 'ru';
 
-// Drive C is off limits - it is short on space. Everything lives on E.
-app.setPath('userData', 'E:\\PeroLauncher\\userdata');
+// Where the launcher keeps everything of its own. No drive letter is written
+// down anywhere in the code: in development this is the project folder, in a
+// built exe it is the folder the exe sits in. So the launcher can be moved to
+// another disk, or the same card can come back under a different letter, and
+// it still finds its settings, accounts and packs.
+//
+// Installing onto the system drive is the player's business and has to work,
+// Program Files included. The one place the exe's own folder will not do is
+// exactly there: a program folder is not the player's to write into, so the
+// per-user folder answers for it instead.
+//
+// Program Files is ruled out by where it is rather than by trying to write
+// into it, because trying gives different answers on different runs: the first
+// launch after an install can still be elevated and would succeed, and every
+// ordinary launch after it would fail and go looking somewhere else - the
+// player would lose their accounts and packs to a launcher that was simply
+// asked for administrator rights once.
+const launcherDir = (() => {
+  if (!app.isPackaged) return __dirname;
+  const besideExe = path.dirname(app.getPath('exe'));
+  const perUser = path.join(app.getPath('appData'), 'PeroLauncher');
+  if (insideProgramFiles(besideExe)) return perUser;
+  return canWriteInto(besideExe) ? besideExe : perUser;
+})();
 
-const settingsPath = 'E:\\PeroLauncher\\settings.json';
+function insideProgramFiles(directory) {
+  const bases = [
+    process.env['ProgramFiles'],
+    process.env['ProgramFiles(x86)'],
+    process.env['ProgramW6432']
+  ].filter(Boolean);
+
+  return bases.some(base => {
+    const relative = path.relative(base, directory);
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  });
+}
+
+function canWriteInto(directory) {
+  try {
+    fs.mkdirSync(directory, { recursive: true });
+    const probe = path.join(directory, `.write-probe-${process.pid}`);
+    fs.writeFileSync(probe, '');
+    fs.unlinkSync(probe);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Every file of ours is named from that folder and from nowhere else.
+function launcherFile(...parts) {
+  return path.join(launcherDir, ...parts);
+}
+
+app.setPath('userData', launcherFile('userdata'));
+
+const settingsPath = launcherFile('settings.json');
 
 // Mojang's list of every official version. Cached on disk so the version
 // picker still works without a connection.
 const VERSION_MANIFEST_URL = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json';
-const versionsCachePath = 'E:\\PeroLauncher\\versions-cache.json';
+const versionsCachePath = launcherFile('versions-cache.json');
 
 const defaultSettings = {
   version: '1.21.1',
@@ -38,7 +92,7 @@ const defaultSettings = {
   windowWidth: 854,
   windowHeight: 480,
   fullscreen: false,
-  gameFolder: 'E:\\.minecraft',
+  gameFolder: launcherFile('.minecraft'),
   language: 'ru',
   javaPath: null,
   javaArgs: '',
@@ -66,10 +120,33 @@ const defaultSettings = {
   }
 };
 
+// The game folder is the one path a player may point wherever they like, so
+// what they chose is what is kept. What is not kept is a dead drive letter: a
+// folder inside the launcher's own directory is written down relative to it
+// and comes back attached to wherever the launcher is now, and an absolute one
+// whose drive is no longer in the machine gives way to the default instead of
+// failing halfway through a launch.
+function storeGameFolder(folder) {
+  if (!folder) return folder;
+  const relative = path.relative(launcherDir, folder);
+  if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) return relative;
+  return folder;
+}
+
+function resolveGameFolder(stored) {
+  if (!stored) return defaultSettings.gameFolder;
+  const full = path.resolve(launcherDir, stored);
+  const root = path.parse(full).root;
+  // Only a plain drive letter is worth checking - a network path is not ours
+  // to judge, and it is better to try it than to refuse it.
+  if (/^[A-Za-z]:/.test(root) && !fs.existsSync(root)) return defaultSettings.gameFolder;
+  return full;
+}
+
 function loadSettings() {
   if (!fs.existsSync(settingsPath)) {
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
-    fs.writeFileSync(settingsPath, JSON.stringify(defaultSettings, null, 2));
+    saveSettingsToDisk(defaultSettings);
     return { ...defaultSettings };
   }
   const raw = fs.readFileSync(settingsPath, 'utf-8');
@@ -88,11 +165,14 @@ function loadSettings() {
     settings.onGameStart = 'hide';
   }
 
+  settings.gameFolder = resolveGameFolder(parsed.gameFolder);
+
   return settings;
 }
 
 function saveSettingsToDisk(settings) {
-  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+  const onDisk = { ...settings, gameFolder: storeGameFolder(settings.gameFolder) };
+  fs.writeFileSync(settingsPath, JSON.stringify(onDisk, null, 2));
 }
 
 // Modpacks. A player who only wants to play never has to make one - the
@@ -100,8 +180,8 @@ function saveSettingsToDisk(settings) {
 // to it there and then, and from that moment those answer for it: mods go
 // into the pack rather than into the shared game folder, and picking it
 // overrides what the settings page says.
-const instancesPath = 'E:\\PeroLauncher\\instances.json';
-const instancesDir = 'E:\\PeroLauncher\\instances';
+const instancesPath = launcherFile('instances.json');
+const instancesDir = launcherFile('instances');
 
 function loadInstances() {
   if (!fs.existsSync(instancesPath)) return { activeId: null, instances: [] };
@@ -151,7 +231,7 @@ function instanceId(name, taken) {
 // on its own, but still the thing that gets someone into the account. The
 // settings file is something a user will sooner or later copy, post in a chat
 // or hand over for help, and it must be safe to do that.
-const accountsPath = 'E:\\PeroLauncher\\accounts.json';
+const accountsPath = launcherFile('accounts.json');
 
 function loadAccounts() {
   if (!fs.existsSync(accountsPath)) return { activeId: null, accounts: [] };
@@ -447,7 +527,7 @@ ipcMain.handle('add-offline-account', (event, rawName) => {
 
 // Skins are kept once they are fetched, so the main screen has a face to show
 // the moment it opens and keeps one when the connection is down.
-const skinsDir = 'E:\\PeroLauncher\\skins';
+const skinsDir = launcherFile('skins');
 
 // The two skins Minecraft hands out to anyone who has not set one. Which of
 // them a player gets is decided by their id, and this is the same arithmetic
@@ -1216,8 +1296,8 @@ function hasShaderLoader(instance) {
 // The categories each kind is filed under, taken from Modrinth rather than
 // written down here - a list kept by hand drifts from the real one, and the
 // player is the one who finds out.
-const categoriesCachePath = 'E:\\PeroLauncher\\modrinth-categories.json';
-const gameVersionsCachePath = 'E:\\PeroLauncher\\modrinth-versions.json';
+const categoriesCachePath = launcherFile('modrinth-categories.json');
+const gameVersionsCachePath = launcherFile('modrinth-versions.json');
 
 async function modrinthCategories() {
   try {
@@ -2102,12 +2182,12 @@ const modLoaders = {
 
 // Installer jars are kept beside the launcher, not in the game folder -
 // they are build tooling, not something the game reads.
-const loadersDir = 'E:\\PeroLauncher\\loaders';
+const loadersDir = launcherFile('loaders');
 
 // Java runtimes the launcher downloads itself, plus a small note of which
 // Java each game version asks for, so we do not refetch that every launch.
-const javaDir = 'E:\\PeroLauncher\\java';
-const javaRequirementsPath = 'E:\\PeroLauncher\\java-versions.json';
+const javaDir = launcherFile('java');
+const javaRequirementsPath = launcherFile('java-versions.json');
 
 // Every version json names the runtime it expects, both as a component
 // ("java-runtime-gamma") and a plain major number. Versions older than 1.17
@@ -2156,14 +2236,19 @@ function javaMajorAt(home) {
 }
 
 // Looks where Java installers usually put things, plus our own folder.
+// Where that is comes from Windows itself rather than from a letter written
+// down here - the system is not always on C:, and a launcher that only ever
+// looks at C: would download a second copy of a Java the machine already has.
 function findSystemJavas() {
+  const programFiles = [
+    process.env['ProgramFiles'] || 'C:' + path.sep + 'Program Files',
+    process.env['ProgramFiles(x86)'] || 'C:' + path.sep + 'Program Files (x86)',
+    process.env['ProgramW6432']
+  ].filter(Boolean);
+
+  const vendors = ['Eclipse Adoptium', 'Java', 'Microsoft', 'Amazon Corretto', 'Zulu', 'BellSoft'];
   const roots = [
-    'C:\\Program Files\\Eclipse Adoptium',
-    'C:\\Program Files\\Java',
-    'C:\\Program Files\\Microsoft',
-    'C:\\Program Files (x86)\\Java',
-    'C:\\Program Files\\Amazon Corretto',
-    'C:\\Program Files\\Zulu',
+    ...programFiles.flatMap(base => vendors.map(vendor => path.join(base, vendor))),
     javaDir
   ];
 
@@ -2294,7 +2379,10 @@ async function downloadMojangRuntime(component) {
 // the runtime when the machine has nothing suitable - which is the normal
 // case for someone who has never installed Java.
 async function resolveJavaPath(mcVersion, manualPath) {
-  if (manualPath) return manualPath;
+  // A hand-picked runtime that is no longer on the machine - the drive it was
+  // on has gone, or it was uninstalled - is not an answer. Better to pick one
+  // ourselves than to hand the game a path to nothing.
+  if (manualPath && fs.existsSync(manualPath)) return manualPath;
   const required = await requiredJava(mcVersion);
 
   // Already fetched by us before, from either source - the surest match.

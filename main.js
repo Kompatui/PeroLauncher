@@ -1464,7 +1464,10 @@ async function startGame(profile, ramOverride) {
 
   if (givenUp()) return { started: false, error: 'cancelled' };
 
-  say('files', { type: '', done: 0, total: 0 });
+  // Nothing has been fetched at this point and nothing has even been looked at
+  // yet - the next thing that happens is the looking. Saying "downloading" here
+  // was the same untruth as saying it during the checks, only a second earlier.
+  say('files', { type: '', done: 0, total: 0, checking: true });
 
   // Handed to a process of its own. Doing it here meant the window stopped
   // answering while thousands of files were checked, and a player could press

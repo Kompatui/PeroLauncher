@@ -248,6 +248,7 @@
   "launch.failed.java": "Java konnte nicht vorbereitet werden",
   "launch.failed.loader": "Der Mod-Loader konnte nicht installiert werden",
   "launch.failed.jarmods": "Das Spiel konnte nicht mit den Jar-Mods gebaut werden",
+  "launch.failed.packdata": "Die Dateien des Modpacks konnten nicht bereitgelegt werden",
   "launch.mayBeConnection": "Meist ist es die Verbindung - versuche es erneut. Wenn es bleibt, prüfe Version und Loader in den Einstellungen.",
   "launch.notPublished": "Diesen Loader-Build gibt es auf dem Server nicht - erneutes Versuchen ändert daran nichts. Wähle in den Einstellungen einen anderen.",
   "launch.cancelling": "Wird abgebrochen…",

@@ -180,8 +180,325 @@ function saveSettingsToDisk(settings) {
 // to it there and then, and from that moment those answer for it: mods go
 // into the pack rather than into the shared game folder, and picking it
 // overrides what the settings page says.
+//
+// The list is the launcher's own bookkeeping and stays with the launcher. The
+// packs themselves live in the game folder - see below.
 const instancesPath = launcherFile('instances.json');
-const instancesDir = launcherFile('instances');
+
+// Where the packs used to live, one full copy of the game inside each. Kept
+// only so they can be moved out of there once.
+const legacyPacksDir = launcherFile('instances');
+
+// ---------------------------------------------------------------------------
+// One game folder, and the launcher works out what belongs to whom.
+//
+// Everything a player accumulates is shared and stays shared: worlds, the
+// options file, resource packs, shaders, screenshots - and the downloaded game
+// as well, which is what actually costs something. Assets, libraries and
+// versions used to be fetched again in full for every pack; four packs here
+// held about three gigabytes between them, and perhaps a hundred megabytes of
+// that was theirs.
+//
+// A pack owns two folders and no more. While it is the one being played they
+// are laid out in the game folder itself - the only place the game will look
+// for them - and the folders of whoever was there before are put away.
+//
+// Folders are moved rather than linked. A link would read better, but an
+// ordinary recursive delete follows a Windows junction straight through and
+// erases what is on the far side. That was measured here, not assumed, and on
+// the far side would be every world the player has.
+// Every version writes its mod settings into the same config folder, and the
+// formats are not the same. Forge for 1.6.4 writes lists as
+//
+//   I:biomeSkyBlendRange <
+//       20
+//   >
+//
+// and Forge for 1.4.2 has never heard of that, so it dies on the file with
+// "unknown character" before the game window appears. The player did nothing
+// wrong: they played a newer version once.
+//
+// So the folder belongs to one version at a time. The one on its way out is
+// put away under its own name and brought back when that version is played
+// again. Worlds, resource packs and screenshots stay shared, which is what
+// people actually want shared.
+//
+// That is why config is one of the two, and not shared like the rest.
+const PACK_OWNED = ['mods', 'config'];
+
+function packsDir(gameFolder) {
+  return path.join(gameFolder, 'instances');
+}
+
+function ownerFilePath(gameFolder) {
+  return path.join(packsDir(gameFolder), 'owner.txt');
+}
+
+// Whose mods and config are laid out in the game folder at this moment.
+function currentOwner(gameFolder) {
+  try {
+    return fs.readFileSync(ownerFilePath(gameFolder), 'utf-8').trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+// Playing without a pack is an owner like any other, one per version and
+// loader: the mods of 1.7.10 have no business being handed to 1.21.
+function ownerKey(pack, settings) {
+  if (pack) return pack.id;
+  const plain = `no-pack-${settings.version}-${settings.loader || 'vanilla'}`;
+  return plain.replace(/[^A-Za-z0-9._-]/g, '_');
+}
+
+// A pack's own files, wherever they happen to be right now: laid out in the
+// game folder if this is the pack being played, waiting in its own folder if
+// it is not. Both answers are correct - which one applies is not something the
+// rest of the launcher should have to think about.
+function packContentDir(instance, folderName) {
+  const gameFolder = loadSettings().gameFolder;
+  if (currentOwner(gameFolder) === instance.id) return path.join(gameFolder, folderName);
+  return path.join(packsDir(gameFolder), instance.id, folderName);
+}
+
+// The launcher's note of what it installed into a pack. It is never handed to
+// the game, so unlike the mods themselves it stays in one place.
+function packRecordDir(instance) {
+  return path.join(packsDir(loadSettings().gameFolder), instance.id);
+}
+
+// Where a thing of this kind belongs for this pack. Mods and configs are the
+// pack's own. Resource packs and shaders are not: those are shared with every
+// pack on purpose, so a texture the player likes is theirs everywhere rather
+// than something to install again in each pack.
+function contentDirFor(instance, spec) {
+  if (PACK_OWNED.includes(spec.folder)) return packContentDir(instance, spec.folder);
+  return path.join(loadSettings().gameFolder, spec.folder);
+}
+
+// A ready-made pack ships more than its own mods - resource packs, shaders,
+// sometimes an options file. Each file goes where its kind belongs rather than
+// all of it into the pack.
+function packFileDestination(instance, relativePath) {
+  const parts = String(relativePath).split(/[\\/]/).filter(Boolean);
+  if (!parts.length) return null;
+
+  if (PACK_OWNED.includes(parts[0])) {
+    return safeInside(packContentDir(instance, parts[0]), parts.slice(1).join(path.sep));
+  }
+  return safeInside(loadSettings().gameFolder, parts.join(path.sep));
+}
+
+// Moves a folder onto another. A plain rename when the destination is free,
+// which is the usual case and costs nothing even for thousands of files, and
+// entry by entry when it is not.
+//
+// Nothing is ever overwritten. What happens to a file that is already there is
+// the caller's decision, because it differs: two files named the same under
+// assets are the same file by construction and one of them is waste, while two
+// worlds named "New World" are two different worlds and losing one is losing
+// somebody's evenings.
+function mergeFolder(from, to, onCollision = 'keep') {
+  if (!fs.existsSync(from)) return;
+
+  if (!fs.existsSync(to)) {
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    try {
+      fs.renameSync(from, to);
+      return;
+    } catch {
+      // A different drive, or something appeared in between. Go the slow way.
+      fs.mkdirSync(to, { recursive: true });
+    }
+  }
+
+  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+    const source = path.join(from, entry.name);
+    let target = path.join(to, entry.name);
+
+    if (fs.existsSync(target)) {
+      if (onCollision === 'drop' || onCollision === 'keep') {
+        // Two folders of the same name are one folder with more in it: go in
+        // and settle it file by file.
+        if (entry.isDirectory()) {
+          mergeFolder(source, target, onCollision);
+          continue;
+        }
+        // A file already there is either the same file (drop the spare) or one
+        // we were told not to touch (leave ours where it is, in plain sight).
+        if (onCollision === 'drop') fs.rmSync(source, { force: true });
+        continue;
+      }
+
+      // Told to keep both. Whatever this is - a world, a resource pack - it is
+      // one thing and goes in whole under another name. Merging a world into
+      // another world by file would destroy them both.
+      target = freeNameBeside(target, onCollision);
+    }
+
+    try {
+      fs.renameSync(source, target);
+    } catch {
+      fs.cpSync(source, target, { recursive: true });
+      fs.rmSync(source, { recursive: true, force: true });
+    }
+  }
+
+  // Only if it actually emptied. Anything left is something the caller asked
+  // to keep, and it stays where the player can still find it.
+  try {
+    if (fs.readdirSync(from).length === 0) fs.rmdirSync(from);
+  } catch {}
+}
+
+// "New World" out of a pack called Skyblock becomes "New World (Skyblock)",
+// and gets a number after that if even this is taken.
+function freeNameBeside(target, note) {
+  const dir = path.dirname(target);
+  const ext = path.extname(target);
+  const stem = path.basename(target, ext);
+  for (let n = 0; n < 100; n++) {
+    const suffix = n === 0 ? ` (${note})` : ` (${note} ${n + 1})`;
+    const candidate = path.join(dir, stem + suffix + ext);
+    if (!fs.existsSync(candidate)) return candidate;
+  }
+  return path.join(dir, `${stem} (${note} ${Date.now()})${ext}`);
+}
+
+// Moving in. Everything below used to live somewhere else, and this puts it
+// where it belongs now. It runs at every start and does nothing at all once
+// there is nothing left to move.
+//
+// A name that turns up twice is judged by what folder it is in. Under assets,
+// libraries and versions a name is a hash or a version number, so the same
+// name is the same file and the second copy is pure waste. A world or a
+// resource pack is not: two of those sharing a name are two different things,
+// and the incoming one is kept under the name of the pack it came from.
+const SHARED_WHEN_MOVING = [
+  ['assets', 'drop'], ['libraries', 'drop'], ['versions', 'drop'],
+  ['natives', 'drop'], ['cache', 'drop'], ['logs', 'drop'], ['crash-reports', 'drop'],
+  ['saves', 'rename'], ['resourcepacks', 'rename'], ['shaderpacks', 'rename'],
+  ['screenshots', 'rename']
+];
+
+// Loose files that belong to the player rather than to a pack.
+const PLAYER_FILES = [
+  'options.txt', 'optionsof.txt', 'optionsshaders.txt',
+  'servers.dat', 'servers.dat_old', 'usercache.json', 'usernamecache.json'
+];
+
+function migrateIntoGameFolder(gameFolder) {
+  migrateLegacyPacks(gameFolder);
+  migratePerVersionConfigs(gameFolder);
+}
+
+// The packs used to sit beside the launcher with a full copy of the game
+// inside each one.
+function migrateLegacyPacks(gameFolder) {
+  if (!fs.existsSync(legacyPacksDir)) return;
+
+  const packs = fs.readdirSync(legacyPacksDir, { withFileTypes: true })
+    .filter(entry => entry.isDirectory());
+
+  for (const entry of packs) {
+    const from = path.join(legacyPacksDir, entry.name);
+
+    for (const [name, rule] of SHARED_WHEN_MOVING) {
+      mergeFolder(path.join(from, name), path.join(gameFolder, name),
+        rule === 'rename' ? entry.name : 'drop');
+    }
+
+    for (const name of PLAYER_FILES) {
+      const loose = path.join(from, name);
+      if (!fs.existsSync(loose)) continue;
+      const target = path.join(gameFolder, name);
+      if (fs.existsSync(target)) continue;
+      try { fs.renameSync(loose, target); } catch {}
+    }
+
+    // Whatever is left is the pack's own - its mods, its config, and anything
+    // it shipped that we have no name for.
+    mergeFolder(from, path.join(packsDir(gameFolder), entry.name), 'keep');
+    console.log('[MOVE] pack moved into the game folder:', entry.name);
+  }
+
+  // Only if it emptied. Something left behind is something worth looking at.
+  try { fs.rmdirSync(legacyPacksDir); } catch {}
+}
+
+// Playing without a pack used to keep one config folder per version in a store
+// of its own. That is the same idea as a pack owning its config, so those
+// become owners like any other.
+function migratePerVersionConfigs(gameFolder) {
+  const store = path.join(gameFolder, 'config-per-version');
+  if (!fs.existsSync(store)) return;
+
+  const ownerFile = path.join(store, 'owner.txt');
+  const owner = fs.existsSync(ownerFile) ? fs.readFileSync(ownerFile, 'utf-8').trim() : null;
+
+  for (const entry of fs.readdirSync(store, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    mergeFolder(path.join(store, entry.name),
+      path.join(packsDir(gameFolder), 'no-pack-' + entry.name, 'config'), 'keep');
+  }
+
+  // Whatever is laid out in the game folder right now was that owner's.
+  if (owner && !currentOwner(gameFolder)) {
+    fs.mkdirSync(packsDir(gameFolder), { recursive: true });
+    fs.writeFileSync(ownerFilePath(gameFolder), 'no-pack-' + owner);
+  }
+
+  fs.rmSync(ownerFile, { force: true });
+  try { fs.rmdirSync(store); } catch {}
+}
+
+// The packs live in the game folder, so when the player points the launcher at
+// a different one, the packs go too. They meant the game to live elsewhere,
+// not their packs to vanish.
+function movePacksBetweenGameFolders(from, to) {
+  const owner = currentOwner(from);
+  if (owner) {
+    // Otherwise this pack's mods would be left behind in a folder that is not
+    // the game folder any more.
+    for (const name of PACK_OWNED) {
+      mergeFolder(path.join(from, name), path.join(packsDir(from), owner, name), 'keep');
+    }
+    fs.rmSync(ownerFilePath(from), { force: true });
+  }
+  mergeFolder(packsDir(from), packsDir(to), 'keep');
+}
+
+// Hands the game folder to one pack. What is lying there goes back to whoever
+// owns it, and this pack's own files take its place.
+function usePackData(gameFolder, key) {
+  const store = packsDir(gameFolder);
+  fs.mkdirSync(store, { recursive: true });
+  const owner = currentOwner(gameFolder);
+
+  if (owner !== key) {
+    for (const name of PACK_OWNED) {
+      const live = path.join(gameFolder, name);
+      if (!fs.existsSync(live)) continue;
+      // Without a recorded owner there is no telling whose these are, so they
+      // are put aside under a name of their own rather than thrown out.
+      mergeFolder(live, path.join(store, owner || 'unclaimed', name), 'keep');
+    }
+
+    // Recorded before the incoming files are laid out, not after. If the
+    // launcher stops between the two, the next run reads its own name and
+    // finishes the job; the other order would hand these files to whoever
+    // came next.
+    fs.writeFileSync(ownerFilePath(gameFolder), key);
+  }
+
+  for (const name of PACK_OWNED) {
+    const mine = path.join(store, key, name);
+    const live = path.join(gameFolder, name);
+    if (fs.existsSync(mine)) mergeFolder(mine, live, 'keep');
+    else fs.mkdirSync(live, { recursive: true });
+  }
+}
+// ---------------------------------------------------------------------------
 
 function loadInstances() {
   if (!fs.existsSync(instancesPath)) return { activeId: null, instances: [] };
@@ -201,8 +518,11 @@ function saveInstances(store) {
   fs.writeFileSync(instancesPath, JSON.stringify(store, null, 2));
 }
 
+// Everything of a pack's in one place, for showing and for deleting. Not for
+// reaching a particular folder of it - packContentDir answers that, and its
+// answer is not always in here.
 function instanceFolder(instance) {
-  return path.join(instancesDir, instance.id);
+  return path.join(packsDir(loadSettings().gameFolder), instance.id);
 }
 
 // The one in use, or null when the player is on the plain path.
@@ -415,7 +735,17 @@ ipcMain.handle('set-locale', (event, lang) => {
 
 ipcMain.handle('get-settings', () => loadSettings());
 ipcMain.handle('save-settings', (event, settings) => {
+  const before = loadSettings().gameFolder;
   saveSettingsToDisk(settings);
+  const after = loadSettings().gameFolder;
+
+  if (path.resolve(before) !== path.resolve(after)) {
+    try {
+      movePacksBetweenGameFolders(before, after);
+    } catch (e) {
+      console.log('[MOVE] could not carry the packs across:', e.message);
+    }
+  }
   return true;
 });
 
@@ -710,7 +1040,7 @@ ipcMain.handle('create-instance', (event, draft) => {
     createdAt: new Date().toISOString()
   };
 
-  fs.mkdirSync(path.join(instancesDir, instance.id, 'mods'), { recursive: true });
+  fs.mkdirSync(packContentDir(instance, 'mods'), { recursive: true });
   store.instances.push(instance);
   store.activeId = instance.id;
   saveInstances(store);
@@ -744,8 +1074,20 @@ ipcMain.handle('delete-instance', async (event, id) => {
   });
   if (answer !== 0) return { ok: false };
 
-  // Worlds live in here too, so it goes to the recycle bin rather than being
-  // erased - a wrong click should be survivable.
+  // A pack being played has its mods and config laid out in the game folder
+  // rather than in its own, so they are gathered back in first. Otherwise
+  // deleting this pack would leave its mods behind for whoever plays next.
+  const gameFolder = loadSettings().gameFolder;
+  if (currentOwner(gameFolder) === instance.id) {
+    for (const name of PACK_OWNED) {
+      mergeFolder(path.join(gameFolder, name), path.join(packsDir(gameFolder), instance.id, name), 'keep');
+    }
+    fs.writeFileSync(ownerFilePath(gameFolder), '');
+  }
+
+  // Worlds are not in here - they are shared and stay where they are - but
+  // hours of arranging mods may be, so it goes to the recycle bin rather than
+  // being erased. A wrong click should be survivable.
   await shell.trashItem(instanceFolder(instance)).catch(() => {
     fs.rmSync(instanceFolder(instance), { recursive: true, force: true });
   });
@@ -758,7 +1100,14 @@ ipcMain.handle('delete-instance', async (event, id) => {
 
 ipcMain.handle('open-instance-folder', (event, id) => {
   const instance = loadInstances().instances.find(entry => entry.id === id);
-  if (instance) shell.openPath(instanceFolder(instance));
+  // Where its mods actually are at this moment, which for the pack being
+  // played is the game folder itself. Opening an empty folder instead would be
+  // technically true and useless.
+  if (instance) {
+    const folder = path.dirname(packContentDir(instance, 'mods'));
+    fs.mkdirSync(folder, { recursive: true });
+    shell.openPath(folder);
+  }
 });
 
 ipcMain.handle('list-instance-mods', (event, id, kind) => {
@@ -771,7 +1120,7 @@ ipcMain.handle('remove-instance-mod', (event, id, filename, kind) => {
   const spec = CONTENT_KINDS[kind || 'mod'];
   if (!instance || !spec || filename !== path.basename(filename)) return { ok: false };
 
-  const file = path.join(instanceFolder(instance), spec.folder, filename);
+  const file = path.join(contentDirFor(instance, spec), filename);
   if (fs.existsSync(file)) fs.rmSync(file, { recursive: true, force: true });
   return { ok: true };
 });
@@ -976,7 +1325,6 @@ async function startGame(profile, ramOverride) {
     settings.version = pack.version;
     settings.loader = pack.loader;
     settings.loaderVersion = pack.loaderVersion;
-    settings.gameFolder = instanceFolder(pack);
     if (pack.ram) settings.ram = pack.ram;
   }
 
@@ -1093,15 +1441,18 @@ async function startGame(profile, ramOverride) {
     }
   }
 
-  // Only the shared folder needs this. A pack has a folder to itself, so
-  // nothing is there to clash with it, and shuffling its config about would
-  // be meddling for no reason.
-  if (!pack) {
-    try {
-      useConfigOf(settings.gameFolder, `${settings.version}-${settings.loader || 'vanilla'}`);
-    } catch (e) {
-      console.log('Could not swap the config folder:', e.message);
-    }
+  // One game folder for everything, and whoever is being played gets their own
+  // mods and config laid out in it. Worlds, settings and resource packs are
+  // deliberately left alone - those belong to the player, not to the pack, and
+  // they carry across.
+  //
+  // This one is not allowed to fail quietly. Carrying on would start the game
+  // with somebody else's mods, and the player would be looking at a crash
+  // report about a mod they never installed.
+  try {
+    usePackData(settings.gameFolder, ownerKey(pack, settings));
+  } catch (e) {
+    return fail('packdata', e.message);
   }
 
   // Whatever the player typed goes on last, so it wins over what the launcher
@@ -1446,10 +1797,10 @@ function listInstanceContent(instance, kind = 'mod') {
   const spec = CONTENT_KINDS[kind];
   if (!spec) return [];
 
-  const folder = path.join(instanceFolder(instance), spec.folder);
+  const folder = contentDirFor(instance, spec);
   if (!fs.existsSync(folder)) return [];
 
-  const recordPath = path.join(instanceFolder(instance), 'mods.json');
+  const recordPath = path.join(packRecordDir(instance), 'mods.json');
   let known = [];
   try {
     known = JSON.parse(fs.readFileSync(recordPath, 'utf-8'));
@@ -1476,7 +1827,8 @@ function listInstanceContent(instance, kind = 'mod') {
 }
 
 function rememberMod(instance, entry) {
-  const recordPath = path.join(instanceFolder(instance), 'mods.json');
+  const recordPath = path.join(packRecordDir(instance), 'mods.json');
+  fs.mkdirSync(path.dirname(recordPath), { recursive: true });
   let known = [];
   try {
     known = JSON.parse(fs.readFileSync(recordPath, 'utf-8'));
@@ -1504,7 +1856,7 @@ async function installMod(instance, source, projectId, kind = 'mod', seen = new 
   const file = await provider.pickFile(projectId, instance, kind);
   if (!file) return [{ projectId, ok: false, reason: 'no-build' }];
 
-  const folder = path.join(instanceFolder(instance), spec.folder);
+  const folder = contentDirFor(instance, spec);
   fs.mkdirSync(folder, { recursive: true });
   const destination = path.join(folder, file.filename);
 
@@ -1707,7 +2059,7 @@ async function installPackArchive(data, origin, report = () => {}) {
 
   let done = 0;
   for (const file of wanted) {
-    const destination = safeInside(folder, file.path);
+    const destination = packFileDestination(instance, file.path);
     if (!destination) {
       console.log('[MODPACK] refused a path outside the pack folder:', file.path);
       continue;
@@ -1742,7 +2094,7 @@ async function installPackArchive(data, origin, report = () => {}) {
     const match = entry.entryName.match(/^(?:client-)?overrides\/(.+)$/);
     if (!match || entry.isDirectory) continue;
 
-    const destination = safeInside(folder, match[1]);
+    const destination = packFileDestination(instance, match[1]);
     if (!destination) continue;
 
     fs.mkdirSync(path.dirname(destination), { recursive: true });
@@ -1868,46 +2220,6 @@ ipcMain.handle('reveal-crash-report', (event, id) => {
   if (file && fs.existsSync(file)) shell.showItemInFolder(file);
 });
 
-// Every version writes its mod settings into the same config folder, and the
-// formats are not the same. Forge for 1.6.4 writes lists as
-//
-//   I:biomeSkyBlendRange <
-//       20
-//   >
-//
-// and Forge for 1.4.2 has never heard of that, so it dies on the file with
-// "unknown character" before the game window appears. The player did nothing
-// wrong: they played a newer version once.
-//
-// So the folder belongs to one version at a time. The one on its way out is
-// put away under its own name and brought back when that version is played
-// again. Worlds, resource packs and screenshots stay shared, which is what
-// people actually want shared.
-function useConfigOf(gameFolder, versionKey) {
-  const configDir = path.join(gameFolder, 'config');
-  const store = path.join(gameFolder, 'config-per-version');
-  const ownerFile = path.join(store, 'owner.txt');
-
-  const key = versionKey.replace(/[^A-Za-z0-9._-]/g, '_');
-  const owner = fs.existsSync(ownerFile) ? fs.readFileSync(ownerFile, 'utf-8').trim() : null;
-  if (owner === key) return;
-
-  fs.mkdirSync(store, { recursive: true });
-
-  // Put the outgoing settings away. Without a recorded owner there is no
-  // telling whose they are, so they are kept aside rather than thrown out.
-  if (fs.existsSync(configDir)) {
-    const kept = path.join(store, owner || 'unclaimed');
-    fs.rmSync(kept, { recursive: true, force: true });
-    fs.renameSync(configDir, kept);
-  }
-
-  const mine = path.join(store, key);
-  if (fs.existsSync(mine)) fs.renameSync(mine, configDir);
-  else fs.mkdirSync(configDir, { recursive: true });
-
-  fs.writeFileSync(ownerFile, key);
-}
 
 // Java refusing to start at all because the heap it was asked for will not
 // fit. Nothing has run yet, nothing is lost, and a smaller heap would work -
@@ -3113,7 +3425,16 @@ ipcMain.handle('open-game-folder', () => {
   shell.openPath(settings.gameFolder);
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  // Never allowed to stop the launcher from opening. A pack that has not moved
+  // yet is a pack in the wrong folder; a launcher that will not start is worse.
+  try {
+    migrateIntoGameFolder(loadSettings().gameFolder);
+  } catch (e) {
+    console.log('[MOVE] could not finish moving the packs:', e.message);
+  }
+  createWindow();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

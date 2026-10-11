@@ -1,0 +1,3 @@
+# Files here are served byte for byte; a jar or a manifest must never be
+# rewritten on the way in.
+* -text

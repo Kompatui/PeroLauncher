@@ -126,15 +126,25 @@ async function showPacks() {
   const settings = await window.api.getSettings();
   packsView = settings.packsView === 'boxes' ? 'boxes' : 'list';
 
-  const packs = store.instances.map(pack => `
+  const packRow = pack => `
     <div class="pack-row${pack.id === store.activeId ? ' current' : ''}" data-id="${escapeHtml(pack.id)}">
       <span class="pack-main">
         <span class="pack-name">${escapeHtml(pack.name)}</span>
-        <span class="pack-meta">${escapeHtml(pack.version)} · ${escapeHtml(loaderLabel(pack))} · ${countLabel(pack.modCount)}</span>
+        <span class="pack-meta">${escapeHtml(pack.version)} · ${escapeHtml(loaderLabel(pack))} · ${countLabel(pack.modCount)}${
+          pack.featured?.version ? ` · V${escapeHtml(pack.featured.version)}` : ''}</span>
       </span>
-      ${pack.id === store.activeId ? `<span class="pack-badge">${t('packs.active')}</span>` : ''}
+      <span class="pack-badges">
+        ${pack.featured ? `<span class="pack-badge update hidden" id="featured-update">${t('featured.updateBadge')}</span>` : ''}
+        ${pack.id === store.activeId ? `<span class="pack-badge">${t('packs.active')}</span>` : ''}
+      </span>
     </div>
-  `).join('');
+  `;
+
+  // The author's pack is always second, right after playing without one -
+  // installed or not. Installed, it is drawn at once from what is on disk;
+  // not yet, its row waits for the published list.
+  const featured = store.instances.find(pack => pack.featured);
+  const packs = store.instances.filter(pack => pack !== featured).map(packRow).join('');
 
   page.innerHTML = `
     <div class="packs-top">
@@ -153,6 +163,7 @@ async function showPacks() {
           </span>
           ${store.activeId ? '' : `<span class="pack-badge">${t('packs.active')}</span>`}
         </div>
+        <div class="featured-slot" id="featured-slot">${featured ? packRow(featured) : ''}</div>
         ${packs}
       </div>
     </div>
@@ -188,8 +199,10 @@ async function showPacks() {
   document.getElementById('import-pack').addEventListener('click', async () => {
     const file = await window.api.pickModpackFile();
     if (!file) return;
-    installPack(() => window.api.installLocalModpack(file), file.split(/[\\/]/).pop());
+    importPackFile(file);
   });
+
+  showFeaturedOffer();
 
   page.querySelectorAll('.pack-row').forEach(row => {
     row.addEventListener('click', async () => {
@@ -202,6 +215,85 @@ async function showPacks() {
       }
       openPack(id);
     });
+  });
+}
+
+// The published list can take a moment to reach, so the page does not wait
+// for it: the row appears, or gains its update mark, once it is in.
+async function showFeaturedOffer() {
+  const state = await window.api.getFeaturedPack();
+  const slot = document.getElementById('featured-slot');
+  if (!slot || !state.shown || !state.id) return;
+
+  if (state.installedId) {
+    if (state.updateAvailable) document.getElementById('featured-update')?.classList.remove('hidden');
+    return;
+  }
+
+  slot.innerHTML = `
+    <div class="pack-row offer">
+      <span class="pack-main">
+        <span class="pack-name">${escapeHtml(state.name)}</span>
+        <span class="pack-meta">${escapeHtml(state.minecraft)} · ${escapeHtml(loaderLabel(state))} · ${countLabel(state.modCount)} · V${escapeHtml(state.version)}</span>
+      </span>
+      <span class="pack-badge offer">${t('featured.download')}</span>
+    </div>
+  `;
+  slot.querySelector('.pack-row').addEventListener('click', () => confirmFeatured(state, 'install'));
+}
+
+// One window for all three: installing, updating, and changing which sets
+// are in. Each of them is the same act underneath - the pack on disk is
+// brought in line with the list and the ticks.
+function confirmFeatured(state, mode) {
+  const row = (label, value) => `
+    <div class="import-row">
+      <span class="import-label">${label}</span>
+      <span class="import-value">${value}</span>
+    </div>
+  `;
+  // A new player starts with every set off: those are the author's "only if
+  // you know you want it", and some of them can get a player banned.
+  const chosen = new Set(mode === 'install' ? [] : state.installedSets);
+
+  const sets = state.sets.map(set => `
+    <label class="import-row import-check">
+      <span class="import-label">${t('featured.set')}</span>
+      <span class="import-value">
+        <input type="checkbox" data-set="${escapeHtml(set.id)}"${chosen.has(set.id) ? ' checked' : ''}>
+        ${escapeHtml(set.title)} — ${countLabel(set.files.length)}
+        <span class="featured-files">${set.files.map(escapeHtml).join(', ')}</span>
+      </span>
+    </label>
+  `).join('');
+
+  const goLabel = { install: t('featured.download'), update: t('featured.update'), sets: t('featured.apply') }[mode];
+
+  modalBox.innerHTML = `
+    <h3>${escapeHtml(state.name)} V${escapeHtml(state.version)}</h3>
+    <div class="import-facts">
+      ${row(t('packs.gameVersion'), escapeHtml(state.minecraft))}
+      ${row(t('packs.importLoader'), escapeHtml(loaderLabel(state)))}
+      ${row(t('packs.kindMods'), countLabel(state.modCount))}
+      ${mode === 'update' && state.installedVersion ? row(t('featured.installed'), `V${escapeHtml(state.installedVersion)}`) : ''}
+      ${sets}
+    </div>
+    ${state.sets.length ? `<p class="modal-note explain">${t('featured.setExplain')}</p>` : ''}
+    ${state.changelog && mode !== 'sets' ? `
+      <h4 class="featured-heading">${t('featured.changes')}</h4>
+      <div class="featured-changelog">${escapeHtml(state.changelog)}</div>
+    ` : ''}
+    <div class="modal-buttons">
+      <button class="modal-btn" id="featured-go">${goLabel}</button>
+      <button class="modal-btn-cancel" id="modal-cancel">${t('modal.close')}</button>
+    </div>
+  `;
+  overlay.classList.remove('hidden');
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
+
+  document.getElementById('featured-go').addEventListener('click', () => {
+    const picked = [...modalBox.querySelectorAll('input[data-set]')].filter(box => box.checked).map(box => box.dataset.set);
+    installPack(() => window.api.installFeaturedPack(picked), state.name);
   });
 }
 
@@ -241,7 +333,8 @@ async function openPack(id) {
   page.innerHTML = `
     <div class="pack-head">
       <h2>${escapeHtml(pack.name)}</h2>
-      <p class="packs-note">${escapeHtml(pack.version)} · ${escapeHtml(loaderLabel(pack))}</p>
+      <p class="packs-note">${escapeHtml(pack.version)} · ${escapeHtml(loaderLabel(pack))}${
+        pack.featured?.version ? ` · V${escapeHtml(pack.featured.version)}` : ''}</p>
     </div>
 
     <div class="pack-actions">
@@ -249,6 +342,7 @@ async function openPack(id) {
         ${isActive ? t('packs.inUse') : t('packs.use')}
       </button>
       <button class="modal-btn" id="add-mods">${t('packs.addContent')}</button>
+      ${pack.readme ? `<button class="modal-btn" id="open-readme">${t('packs.readme')}</button>` : ''}
       <button class="modal-btn" id="open-folder">${t('packs.openFolder')}</button>
       <button class="modal-btn danger" id="delete-pack">${t('packs.delete')}</button>
     </div>
@@ -265,6 +359,25 @@ async function openPack(id) {
   `;
 
   document.getElementById('open-folder').addEventListener('click', () => window.api.openInstanceFolder(id));
+
+  // The author's pack can be updated, and its optional sets switched, from
+  // here. Asked for after the page is up - the list may take a moment.
+  if (pack.featured) {
+    window.api.getFeaturedPack().then(state => {
+      const actions = document.querySelector('.pack-actions');
+      if (!actions || !state.id || state.installedId !== id) return;
+      const add = (label, mode) => {
+        const button = document.createElement('button');
+        button.className = 'modal-btn';
+        button.textContent = label;
+        button.addEventListener('click', () => confirmFeatured(state, mode));
+        actions.insertBefore(button, actions.children[1]);
+      };
+      if (state.sets.length) add(t('featured.sets'), 'sets');
+      if (state.updateAvailable) add(`${t('featured.updateTo')} V${state.version}`, 'update');
+    });
+  }
+  document.getElementById('open-readme')?.addEventListener('click', () => window.api.openPackReadme(id));
 
   document.getElementById('delete-pack').addEventListener('click', async () => {
     const result = await window.api.deleteInstance(id);
@@ -568,6 +681,9 @@ async function installPack(run, label) {
       fill.style.width = '100%';
       step.textContent = t('packs.unpacking');
     }
+    if (progress.stage === 'loader') {
+      step.textContent = t('packs.importFindingLoader');
+    }
   });
 
   const result = await run();
@@ -585,6 +701,145 @@ async function installPack(run, label) {
   }
 
   openPack(result.pack.id);
+}
+
+// A pack from a file. A Modrinth pack says what it is and goes straight in; a
+// zip somebody packed by hand is read first, and what was found in it is shown
+// before anything is written - the launcher is guessing there, and the player
+// gets the last word on the guess.
+async function importPackFile(file) {
+  const label = file.split(/[\\/]/).pop();
+  modalBox.innerHTML = `
+    <h3>${escapeHtml(label)}</h3>
+    <p class="modal-note">${t('packs.importLooking')}</p>
+  `;
+  overlay.classList.remove('hidden');
+
+  const found = await window.api.inspectLocalModpack(file);
+  if (overlay.classList.contains('hidden')) return;
+
+  if (!found.ok) {
+    modalBox.innerHTML = `
+      <h3>${t('packs.installFailed')}</h3>
+      <p class="modal-note warn">${escapeHtml(found.reason === 'broken-archive' ? t('packs.archiveBroken') : (found.error || ''))}</p>
+      ${closeButtonHtml()}
+    `;
+    wireCloseButton();
+    return;
+  }
+
+  if (found.kind === 'mrpack') {
+    installPack(() => window.api.installLocalModpack(file), label);
+    return;
+  }
+
+  confirmLooseImport(file, found);
+}
+
+function confirmLooseImport(file, found) {
+  const row = (label, value) => `
+    <div class="import-row">
+      <span class="import-label">${label}</span>
+      <span class="import-value">${value}</span>
+    </div>
+  `;
+
+  // The guess first, then every other release, so a wrong guess is one click
+  // away from a right one. With no guess at all, nothing is preselected and
+  // the button waits until something is picked.
+  const versionOptions = `
+    ${found.version ? '' : `<option value="" selected>${t('packs.importPickVersion')}</option>`}
+    ${found.releases.map(version => `
+      <option value="${escapeHtml(version)}"${version === found.version ? ' selected' : ''}>${escapeHtml(version)}</option>
+    `).join('')}
+  `;
+
+  // Optional mods are ticked too: authors call them optional, but usually mean
+  // "the game is hard going without them".
+  const groups = found.groups.map(group => `
+    <label class="import-row import-check">
+      <span class="import-label">${t('packs.kindMods')}</span>
+      <span class="import-value">
+        <input type="checkbox" data-group="${escapeHtml(group.id)}" checked>
+        ${countLabel(group.count)} — ${escapeHtml(group.title)}
+        ${group.optional ? `<span class="import-tag">${t('packs.importOptional')}</span>` : ''}
+      </span>
+    </label>
+  `).join('');
+
+  const listed = items => items.map(escapeHtml).join(', ');
+
+  modalBox.innerHTML = `
+    <h3>${t('packs.importTitle')}</h3>
+    <p class="modal-note explain">${t('packs.importExplain')}</p>
+    <input type="text" id="import-name" class="modal-search" maxlength="40" value="${escapeHtml(found.name)}"
+           placeholder="${t('packs.namePlaceholder')}">
+
+    <div class="import-facts">
+      <div class="import-row">
+        <span class="import-label">${t('packs.gameVersion')}</span>
+        <select id="import-version" class="import-select">${versionOptions}</select>
+      </div>
+      ${row(t('packs.importLoader'), '<span id="import-loader"></span>')}
+      ${groups}
+      ${found.resourcePacks.length ? row(t('packs.kindResourcePacks'), `${listed(found.resourcePacks)} <span class="import-tag">${t('packs.importRpOn')}</span>`) : ''}
+      ${found.worlds.length ? row(t('packs.importWorlds'), listed(found.worlds)) : ''}
+      ${found.shaders.length ? row(t('packs.kindShaders'), listed(found.shaders)) : ''}
+      ${found.hasConfig ? row(t('packs.importConfig'), t('packs.importConfigYes')) : ''}
+      ${found.readme ? row(t('packs.readme'), `${escapeHtml(found.readme)} <span class="import-tag">${t('packs.importReadmeOpens')}</span>`) : ''}
+    </div>
+
+    ${found.unknown.length ? `<p class="modal-note warn">${t('packs.importUnknown')} ${listed(found.unknown)}${found.unknownMore ? ` (+${found.unknownMore})` : ''}</p>` : ''}
+    <p class="modal-note warn hidden" id="import-problem"></p>
+
+    <div class="modal-buttons">
+      <button class="modal-btn" id="import-go">${t('packs.installPack')}</button>
+      <button class="modal-btn-cancel" id="modal-cancel">${t('modal.close')}</button>
+    </div>
+  `;
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
+
+  const versionField = document.getElementById('import-version');
+  const loaderField = document.getElementById('import-loader');
+  const problem = document.getElementById('import-problem');
+  const go = document.getElementById('import-go');
+  const boxes = [...modalBox.querySelectorAll('input[data-group]')];
+
+  // Which loader follows from the mods that are ticked. Untick them all and
+  // the pack is plain Minecraft; tick a Forge set and a Fabric set together
+  // and there is no loader that runs both, which is said before, not after.
+  function refresh() {
+    const ticked = found.groups.filter(group => boxes.find(box => box.dataset.group === group.id)?.checked);
+    const loaders = [...new Set(ticked.flatMap(group => group.loaders))];
+    // Quilt runs Fabric's mods, so the two together are a Quilt pack.
+    if (loaders.includes('quilt') && loaders.includes('fabric')) loaders.splice(loaders.indexOf('fabric'), 1);
+
+    loaderField.textContent = loaders.length
+      ? loaders.map(id => LOADER_NAMES[id] || id).join(' + ')
+      : t('loader.vanilla');
+
+    let reason = '';
+    if (loaders.length > 1) reason = t('packs.importMixedLoaders');
+    else if (!versionField.value) reason = t('packs.importPickVersion');
+
+    problem.textContent = reason;
+    problem.classList.toggle('hidden', !reason || reason === t('packs.importPickVersion'));
+    go.disabled = Boolean(reason);
+  }
+
+  boxes.forEach(box => box.addEventListener('change', refresh));
+  versionField.addEventListener('change', refresh);
+  refresh();
+
+  go.addEventListener('click', () => {
+    const name = document.getElementById('import-name').value.trim() || found.name;
+    const choices = {
+      name,
+      version: versionField.value,
+      groups: boxes.filter(box => box.checked).map(box => box.dataset.group)
+    };
+    installPack(() => window.api.installLocalModpack(file, choices), name);
+  });
 }
 
 // Which build of the pack to take. It used to take the newest without asking,

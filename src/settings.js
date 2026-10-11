@@ -69,6 +69,7 @@ async function loadSettingsUI() {
   // Missing from a settings file written before this existed, and absent is
   // not the same as off.
   document.getElementById('player-model').checked = settings.playerModel !== false;
+  document.getElementById('show-featured-pack').checked = settings.showFeaturedPack !== false;
 }
 
 // Values that are either user data or a translated placeholder.
@@ -177,6 +178,11 @@ document.getElementById('win-fullscreen').addEventListener('change', async (e) =
 
 document.getElementById('player-model').addEventListener('change', async (e) => {
   settings.playerModel = e.target.checked;
+  await saveSettings();
+});
+
+document.getElementById('show-featured-pack').addEventListener('change', async (e) => {
+  settings.showFeaturedPack = e.target.checked;
   await saveSettings();
 });
 

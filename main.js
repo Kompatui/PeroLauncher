@@ -1181,13 +1181,56 @@ ipcMain.handle('pick-modpack-file', async () => {
   return result.filePaths[0];
 });
 
-ipcMain.handle('install-local-modpack', async (event, filePath) => {
+// Looked at before anything is installed: a Modrinth pack says what it is, a
+// hand-made zip has to be read, and the player sees what was found in it.
+ipcMain.handle('inspect-local-modpack', async (event, filePath) => {
+  try {
+    return { ok: true, ...await inspectLocalModpack(filePath) };
+  } catch (e) {
+    // A zip that is cut short - most often one still being downloaded. The
+    // library's own words mean nothing to a player.
+    if (/END header|unsupported zip format/i.test(e.message)) {
+      return { ok: false, reason: 'broken-archive', error: e.message };
+    }
+    return { ok: false, error: e.message };
+  }
+});
+
+// With choices it is a hand-made zip, confirmed on screen; without, a .mrpack.
+ipcMain.handle('install-local-modpack', async (event, filePath, choices = null) => {
   try {
     const report = progress => event.sender.send('modpack-progress', progress);
-    return { ok: true, pack: await installLocalModpack(filePath, report) };
+    const pack = choices
+      ? await installLooseArchive(filePath, choices, report)
+      : await installLocalModpack(filePath, report);
+    return { ok: true, pack };
   } catch (e) {
     return { ok: false, error: e.message };
   }
+});
+
+ipcMain.handle('get-featured-pack', async () => {
+  try {
+    return await featuredPackState();
+  } catch (e) {
+    console.log('[FEATURED] state:', e.message);
+    return { shown: false };
+  }
+});
+
+// Install, update and switching sets on or off are one and the same: bring
+// the pack on disk in line with the published list and the player's choice.
+ipcMain.handle('install-featured-pack', async (event, sets = null) => {
+  try {
+    const report = progress => event.sender.send('modpack-progress', progress);
+    return { ok: true, pack: await installFeaturedPack(sets, report) };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('open-pack-readme', (event, id) => {
+  return openPackReadme(loadInstances().instances.find(entry => entry.id === id));
 });
 
 ipcMain.handle('get-shader-support', (event, id) => {
@@ -1472,10 +1515,21 @@ async function startGame(profile, ramOverride) {
   // This one is not allowed to fail quietly. Carrying on would start the game
   // with somebody else's mods, and the player would be looking at a crash
   // report about a mod they never installed.
+  const previousOwner = currentOwner(settings.gameFolder);
   try {
     usePackData(settings.gameFolder, ownerKey(pack, settings));
   } catch (e) {
     return fail('packdata', e.message);
+  }
+
+  // Resource packs a pack brought with it. Only when the game folder changes
+  // hands, and a failure here is not worth refusing to start the game over.
+  if (previousOwner !== ownerKey(pack, settings)) {
+    try {
+      applyPackResourcePacks(settings.gameFolder, pack, settings.version);
+    } catch (e) {
+      console.log('[RESOURCEPACKS] could not update options.txt:', e.message);
+    }
   }
 
   // Whatever the player typed goes on last, so it wins over what the launcher
@@ -2145,6 +2199,928 @@ async function installPackArchive(data, origin, report = () => {}) {
 
   report({ stage: 'done', done: wanted.length, total: wanted.length });
   return { id: instance.id, name: instance.name, version: mcVersion, loader, files: wanted.length };
+}
+
+// ------------------------------------------------------- the author's pack
+
+// The pack this launcher was made for. It is published as a list of files
+// with their hashes (scripts/make-pack-manifest.js writes it), so a player who
+// already has it fetches only what changed - one new mod is one download, not
+// the whole pack again.
+//
+// Where the list lives. A settings entry of the same name points elsewhere,
+// which is how the author tries a release on their own machine before
+// publishing it - a path on disk works as well as an address.
+const FEATURED_PACK_SOURCE = 'https://raw.githubusercontent.com/Kompatui/PeroLauncher/pack/kempas-mods/manifest.json';
+
+// The last list seen, so the pack still shows - and still plays - with no
+// connection.
+const featuredCachePath = launcherFile('featured-pack.json');
+
+function featuredSource() {
+  return loadSettings().featuredPackSource || FEATURED_PACK_SOURCE;
+}
+
+const isAddress = source => /^https?:\/\//i.test(source);
+
+// A file named relative to the manifest: our own files sit beside it.
+function besideManifest(source, relative) {
+  return isAddress(source) ? new URL(relative, source).href : path.join(path.dirname(source), relative);
+}
+
+async function readFromSource(location, asJson) {
+  if (isAddress(location)) {
+    return asJson ? fetchJson(location, { headers: MOD_API_HEADERS }) : fetchBuffer(location, { headers: MOD_API_HEADERS });
+  }
+  const data = fs.readFileSync(location);
+  return asJson ? JSON.parse(data.toString('utf-8')) : data;
+}
+
+// The published list, fresh if it can be had and the remembered one if not.
+async function featuredManifest() {
+  const source = featuredSource();
+  if (!source) return null;
+  try {
+    const manifest = await readFromSource(source, true);
+    if (manifest?.formatVersion !== 1 || !Array.isArray(manifest.files)) throw new Error('not a pack list');
+    fs.writeFileSync(featuredCachePath, JSON.stringify({ source, manifest }));
+    return { manifest, fresh: true };
+  } catch (e) {
+    console.log('[FEATURED] could not read the pack list:', e.message);
+    try {
+      const cached = JSON.parse(fs.readFileSync(featuredCachePath, 'utf-8'));
+      if (cached.source === source) return { manifest: cached.manifest, fresh: false };
+    } catch {}
+    return null;
+  }
+}
+
+function featuredInstance(store, manifest) {
+  return store.instances.find(entry => entry.featured && (!manifest || entry.id === manifest.id)) || null;
+}
+
+function fileSha1(file) {
+  try {
+    return crypto.createHash('sha1').update(fs.readFileSync(file)).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+// Installs the pack, or brings an installed one up to the published list.
+// "sets" are the optional parts the player chose; a set left out is not
+// installed, and one switched off is taken out again.
+//
+// What is the player's stays the player's. A mod they added themselves is not
+// on our list and is never touched. A config they changed is kept, unless the
+// author changed that same file in this release - then the author's wins,
+// because the new mods may need it.
+async function installFeaturedPack(chosenSets, report = () => {}) {
+  const found = await featuredManifest();
+  if (!found) throw new Error('the pack list cannot be reached');
+  const { manifest } = found;
+  const source = featuredSource();
+
+  const store = loadInstances();
+  let instance = featuredInstance(store, manifest);
+  const isNew = !instance;
+  if (isNew) {
+    instance = {
+      id: manifest.id,
+      name: manifest.name,
+      ram: manifest.ram || null,
+      featured: { version: null, sets: [], files: {} },
+      createdAt: new Date().toISOString()
+    };
+    // A pack the player made under the same name keeps its name; ours steps aside.
+    if (store.instances.some(entry => entry.id === instance.id)) {
+      instance.id = instanceId(manifest.id, store.instances.map(entry => entry.id));
+    }
+  }
+
+  const knownSets = new Set((manifest.sets || []).map(set => set.id));
+  const sets = (Array.isArray(chosenSets) ? chosenSets : instance.featured.sets || [])
+    .filter(set => knownSets.has(set));
+  const wanted = manifest.files.filter(file => !file.set || sets.includes(file.set));
+  const before = instance.featured.files || {};
+
+  // What has to be fetched: anything missing or different on disk. A file the
+  // player changed and the author did not is left as the player has it.
+  const toFetch = [];
+  for (const file of wanted) {
+    const destination = packFileDestination(instance, file.path);
+    if (!destination) continue;
+    const onDisk = fileSha1(destination);
+    if (onDisk === file.sha1) continue;
+    if (onDisk && before[file.path] === file.sha1) continue;
+    toFetch.push({ ...file, destination });
+  }
+
+  let done = 0;
+  report({ stage: 'files', done, total: toFetch.length });
+
+  // A few at a time: a pack is a hundred small files, and one after another
+  // most of the wait is the round trip, not the download.
+  const queue = [...toFetch];
+  const worker = async () => {
+    while (queue.length) {
+      const file = queue.shift();
+      const from = file.url || besideManifest(source, `files/${file.sha1}`);
+      const data = await readFromSource(from, false);
+      if (crypto.createHash('sha1').update(data).digest('hex') !== file.sha1) {
+        throw new Error(`${path.basename(file.path)}: the download does not match its hash`);
+      }
+      fs.mkdirSync(path.dirname(file.destination), { recursive: true });
+      fs.writeFileSync(file.destination, data);
+      done++;
+      report({ stage: 'files', done, total: toFetch.length, name: path.basename(file.path) });
+    }
+  };
+  await Promise.all(Array.from({ length: 4 }, worker));
+
+  // What we put in before and is no longer on the list - a mod the author
+  // dropped, or a set the player switched off. Only if it is still the file we
+  // put there; one the player has since changed is theirs now.
+  const wantedPaths = new Set(wanted.map(file => file.path));
+  for (const [relative, sha1] of Object.entries(before)) {
+    if (wantedPaths.has(relative)) continue;
+    const destination = packFileDestination(instance, relative);
+    if (destination && fileSha1(destination) === sha1) fs.rmSync(destination, { force: true });
+  }
+
+  instance.name = manifest.name;
+  instance.version = manifest.minecraft;
+  instance.loader = manifest.loader || 'vanilla';
+  instance.loaderVersion = manifest.loaderVersion || null;
+  instance.featured = {
+    version: manifest.version,
+    sets,
+    files: Object.fromEntries(wanted.map(file => [file.path, file.sha1]))
+  };
+
+  // Read again: the download took a while, and the list may have changed under it.
+  const latest = loadInstances();
+  latest.instances = latest.instances.filter(entry => entry.id !== instance.id);
+  latest.instances.push(instance);
+  if (isNew) latest.activeId = instance.id;
+  saveInstances(latest);
+
+  report({ stage: 'done', done: toFetch.length, total: toFetch.length });
+  return { id: instance.id, name: instance.name, fetched: toFetch.length };
+}
+
+// The version number is the author's to forget to raise; the files are what
+// actually decide whether there is anything to fetch.
+function featuredDiffers(installed, manifest) {
+  if (installed.featured?.version !== manifest.version) return true;
+  const sets = installed.featured?.sets || [];
+  const had = installed.featured?.files || {};
+  const wanted = manifest.files.filter(file => !file.set || sets.includes(file.set));
+  return wanted.length !== Object.keys(had).length || wanted.some(file => had[file.path] !== file.sha1);
+}
+
+// What the packs page needs to draw the pack's row: what is published, what
+// is installed, and whether the two differ.
+async function featuredPackState() {
+  const settings = loadSettings();
+  if (settings.showFeaturedPack === false || !featuredSource()) return { shown: false };
+
+  const found = await featuredManifest();
+  const installed = featuredInstance(loadInstances(), found?.manifest);
+  if (!found) return { shown: !!installed, installedId: installed?.id || null };
+
+  const { manifest } = found;
+  return {
+    shown: true,
+    fresh: found.fresh,
+    id: manifest.id,
+    name: manifest.name,
+    version: manifest.version,
+    minecraft: manifest.minecraft,
+    loader: manifest.loader,
+    loaderVersion: manifest.loaderVersion,
+    changelog: manifest.changelog || null,
+    sets: (manifest.sets || []).map(set => ({
+      ...set,
+      // "(Not for PPL) InvMove-0.9.3+1.21.11-Fabric.jar" reads as "InvMove":
+      // the note is the set's own title already, the numbers say nothing here.
+      files: manifest.files.filter(file => file.set === set.id).map(file => path.basename(file.path)
+        .replace(/^\([^)]*\)\s*/, '').replace(/\.jar$/i, '').replace(/[-_ ]v?\d.*$/i, ''))
+    })),
+    modCount: manifest.files.filter(file => !file.set && file.path.startsWith('mods/')).length,
+    installedId: installed?.id || null,
+    installedVersion: installed?.featured?.version || null,
+    installedSets: installed?.featured?.sets || [],
+    updateAvailable: !!installed && featuredDiffers(installed, manifest)
+  };
+}
+
+// ------------------------------------------------- packs with no description
+
+// Plenty of packs never went near Modrinth: a zip somebody put together by
+// hand, mods in one folder, a resource pack in another, and a text file telling
+// a person where to copy what. There is no list to read, so the archive is read
+// the way that person would read it - by what each thing in it is.
+//
+// Nothing here knows about any particular pack, and nothing should. What it
+// knows is what the game itself recognises: a resource pack has pack.mcmeta
+// and assets, a world has level.dat, a mod describes itself inside its jar.
+// Whatever is left over is named on the confirmation screen rather than
+// dropped in silence, and the author's own instructions are opened for the
+// player - every pack has its quirks, the author has already written them
+// down, and no amount of code here would keep up with them.
+
+// Which versions of the game read each resource pack format. Only formats
+// whose range is settled; a newer one simply does not narrow the choice.
+const RESOURCE_PACK_FORMATS = {
+  1: ['1.6.1', '1.8.9'], 2: ['1.9', '1.10.2'], 3: ['1.11', '1.12.2'], 4: ['1.13', '1.14.4'],
+  5: ['1.15', '1.16.1'], 6: ['1.16.2', '1.16.5'], 7: ['1.17', '1.17.1'], 8: ['1.18', '1.18.2'],
+  9: ['1.19', '1.19.2'], 12: ['1.19.3', '1.19.3'], 13: ['1.19.4', '1.19.4'], 15: ['1.20', '1.20.1'],
+  18: ['1.20.2', '1.20.2'], 22: ['1.20.3', '1.20.4'], 32: ['1.20.5', '1.20.6'], 34: ['1.21', '1.21.1'],
+  42: ['1.21.2', '1.21.3'], 46: ['1.21.4', '1.21.4'], 55: ['1.21.5', '1.21.5'], 63: ['1.21.6', '1.21.6'],
+  64: ['1.21.7', '1.21.8']
+};
+
+const DOC_FILE = /\.(txt|md|pdf|html?|rtf)$/i;
+const README_NAME = /read.?me|instruc|install|guide|how.?to|инструк|установ|прочт|прочит/i;
+const OPTIONAL_FOLDER = /optional|необязат|опционал|по желанию/i;
+// Folder names that say "a resource pack" and nothing about which one. Put into
+// the shared folder as they are, two packs would fight over "Resourcepack".
+const GENERIC_PACK_NAME = /^(resource ?packs?|resources|textures?|texture ?packs?|rp|pack)$/i;
+
+const NUMERIC_VERSION = /^\d+(\.\d+)*$/;
+
+// One requirement as Fabric and Quilt write it: "1.21.1", "~1.21", "1.21.x",
+// ">=1.21 <1.21.2", or a list of which any one will do. A requirement this
+// cannot read counts as no requirement: offering a version is better than
+// refusing all of them over a typo in someone's mod.
+function fabricAllows(version, requirement) {
+  if (Array.isArray(requirement)) {
+    return requirement.length === 0 || requirement.some(one => fabricAllows(version, one));
+  }
+  if (requirement && typeof requirement === 'object') return true;
+  const text = String(requirement ?? '').trim();
+  if (!text || text === '*') return true;
+
+  return text.split(/\s+/).every(predicate => {
+    const match = predicate.match(/^(>=|<=|>|<|=|~|\^)?v?(.+)$/);
+    if (!match) return true;
+    const op = match[1] || '=';
+    // "1.21.1-" means "and its pre-releases", "+build" is not part of the number.
+    const value = match[2].replace(/[-+].*$/, '');
+    const parts = value.split('.');
+    const wildAt = parts.findIndex(part => /^[xX*]$/.test(part));
+    const fixed = wildAt === -1 ? parts : parts.slice(0, wildAt);
+    if (!fixed.length) return true;
+    if (!fixed.every(part => /^\d+$/.test(part))) return true;
+
+    const base = fixed.join('.');
+    const cmp = compareVersionNumbers(version, base);
+    if (wildAt !== -1) {
+      const mine = version.split('.');
+      return fixed.every((part, i) => Number(mine[i] ?? 0) === Number(part));
+    }
+    switch (op) {
+      case '>=': return cmp >= 0;
+      case '>': return cmp > 0;
+      case '<=': return cmp <= 0;
+      case '<': return cmp < 0;
+      case '~': {
+        const next = fixed.length >= 2 ? `${fixed[0]}.${Number(fixed[1]) + 1}` : `${Number(fixed[0]) + 1}`;
+        return cmp >= 0 && compareVersionNumbers(version, next) < 0;
+      }
+      case '^': return cmp >= 0 && compareVersionNumbers(version, `${Number(fixed[0]) + 1}`) < 0;
+      default: return cmp === 0;
+    }
+  });
+}
+
+// The same question as Forge and NeoForge ask it, in Maven's notation:
+// "[1.21.1,1.22)", "[1.20.1]", "[1.20,)".
+function mavenAllows(version, range) {
+  const text = String(range ?? '').trim();
+  if (!text || text === '*') return true;
+  const spans = [...text.matchAll(/([\[(])\s*([^,\])]*?)\s*(?:,\s*([^\])]*?)\s*)?([\])])/g)];
+  if (!spans.length) return NUMERIC_VERSION.test(text) ? compareVersionNumbers(version, text) === 0 : true;
+
+  return spans.some(([, open, low, high, close]) => {
+    if (high === undefined) return NUMERIC_VERSION.test(low) ? compareVersionNumbers(version, low) === 0 : true;
+    const aboveLow = !NUMERIC_VERSION.test(low) ||
+      (open === '[' ? compareVersionNumbers(version, low) >= 0 : compareVersionNumbers(version, low) > 0);
+    const belowHigh = !NUMERIC_VERSION.test(high) ||
+      (close === ']' ? compareVersionNumbers(version, high) <= 0 : compareVersionNumbers(version, high) < 0);
+    return aboveLow && belowHigh;
+  });
+}
+
+// Some mods put raw line breaks inside their JSON strings, which the format
+// does not allow and every loader quietly forgives. So do we.
+function lenientJson(text) {
+  if (text == null) return null;
+  try { return JSON.parse(text); } catch {}
+  try { return JSON.parse(text.replace(/[\u0000-\u001f]+/g, ' ')); } catch {}
+  return null;
+}
+
+// What a jar says about itself: which loader it is for, what it is called and
+// which versions of the game it will run on. Null when it says nothing - then
+// it is not a mod we can vouch for.
+function describeModJar(data) {
+  let jar;
+  try { jar = new AdmZip(data); } catch { return null; }
+  const read = name => {
+    const entry = jar.getEntry(name);
+    return entry ? entry.getData().toString('utf-8') : null;
+  };
+
+  // A jar that carries both descriptions runs on Fabric too, and its Quilt one
+  // is often left over from an older build ("1.18.2" in a mod for 1.21.11).
+  // Only a Quilt-only mod makes it Quilt.
+  const quilt = jar.getEntry('fabric.mod.json') ? null : lenientJson(read('quilt.mod.json'));
+  if (quilt) {
+    const block = quilt.quilt_loader || {};
+    const game = (block.depends || []).find(dep => (dep?.id || dep) === 'minecraft');
+    return {
+      loader: 'quilt',
+      title: block.metadata?.name || block.id || null,
+      allows: version => !game || typeof game === 'string' || fabricAllows(version, game.versions)
+    };
+  }
+
+  const fabric = lenientJson(read('fabric.mod.json'));
+  if (fabric) {
+    return {
+      loader: 'fabric',
+      title: fabric.name || fabric.id || null,
+      allows: version => fabricAllows(version, fabric.depends?.minecraft)
+    };
+  }
+
+  const neoToml = read('META-INF/neoforge.mods.toml');
+  const toml = neoToml || read('META-INF/mods.toml');
+  if (toml) {
+    // The game's own entry among the dependencies, wherever in the file it is.
+    const block = toml.split(/\[\[\s*dependencies/).find(part => /modId\s*=\s*["']minecraft["']/.test(part));
+    const range = block?.match(/versionRange\s*=\s*["']([^"']*)["']/)?.[1];
+    return {
+      loader: neoToml || /modId\s*=\s*["']neoforge["']/.test(toml) ? 'neoforge' : 'forge',
+      title: toml.match(/displayName\s*=\s*["']([^"']+)["']/)?.[1] || null,
+      allows: version => mavenAllows(version, range)
+    };
+  }
+
+  const info = lenientJson(read('mcmod.info'));
+  if (info) {
+    const first = Array.isArray(info) ? info[0] : info.modList?.[0];
+    const wanted = String(first?.mcversion || '');
+    return {
+      loader: 'forge',
+      title: first?.name || null,
+      allows: version => !NUMERIC_VERSION.test(wanted) || compareVersionNumbers(version, wanted) === 0
+    };
+  }
+
+  return null;
+}
+
+// Every release of the game, newest first. From the cached list of Mojang's
+// versions, fetched once if there is no cache yet.
+async function releaseIds() {
+  let manifest = readVersionCache();
+  if (!manifest) {
+    try { manifest = await fetchVersionManifest(); } catch { manifest = null; }
+  }
+  return (manifest?.versions || [])
+    .filter(version => correctedType(version) === 'release' && NUMERIC_VERSION.test(version.id))
+    .map(version => version.id);
+}
+
+// A name Windows will take for a folder.
+function folderSafeName(name) {
+  return String(name || '').replace(/[<>:"/\\|?*\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim()
+    .replace(/[. ]+$/, '').slice(0, 80);
+}
+
+// Minecraft's formatting codes ("§6Portal") are colours on screen and noise
+// anywhere else.
+function plainPackDescription(description) {
+  if (Array.isArray(description)) return description.map(plainPackDescription).join('');
+  if (description && typeof description === 'object') {
+    return plainPackDescription(description.text || '') + plainPackDescription(description.extra || []);
+  }
+  return String(description || '').replace(/§./g, '').trim();
+}
+
+// Reads the archive and works out a plan: what goes where, which version and
+// loader it wants. Nothing is written - this is what the confirmation screen
+// is drawn from.
+async function planLooseArchive(zip, fileName) {
+  const files = zip.getEntries().filter(entry => !entry.isDirectory);
+  const pathOf = entry => entry.entryName.replace(/\\/g, '/');
+  const dirOf = p => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
+  const inside = (p, dir) => dir === '' || p.startsWith(dir + '/');
+  const lastName = p => p.split('/').pop();
+
+  const name = path.basename(fileName).replace(/\.[^.]+$/, '').replace(/[._]+/g, ' ').trim() || 'Pack';
+
+  // Folders that hold a particular child somewhere directly under them.
+  const dirsWithChild = child => {
+    const found = new Set();
+    for (const entry of files) {
+      const parts = pathOf(entry).split('/');
+      for (let i = 0; i < parts.length - 1; i++) {
+        if (parts[i] === child) found.add(parts.slice(0, i).join('/'));
+      }
+    }
+    return found;
+  };
+  const withAssets = dirsWithChild('assets');
+  const withShaders = dirsWithChild('shaders');
+
+  // Things that are one thing each and go in whole: worlds first, because a
+  // world carries datapacks and resource packs of its own inside it.
+  const claimed = [];
+  const isClaimed = p => claimed.some(dir => inside(p, dir));
+  const worlds = [];
+  const resourcePacks = [];
+  const shaders = [];
+
+  for (const entry of files) {
+    const p = pathOf(entry);
+    if (lastName(p) !== 'level.dat') continue;
+    const dir = dirOf(p);
+    if (isClaimed(p)) continue;
+    claimed.push(dir);
+    worlds.push({ dir, title: lastName(dir) || name });
+  }
+
+  for (const entry of files) {
+    const p = pathOf(entry);
+    if (lastName(p) !== 'pack.mcmeta' || isClaimed(p)) continue;
+    const dir = dirOf(p);
+    // pack.mcmeta without assets is a datapack, which lives inside a world and
+    // has nowhere to go on its own. It is left among the unrecognised.
+    if (!withAssets.has(dir)) continue;
+    const meta = lenientJson(entry.getData().toString('utf-8'))?.pack || {};
+    claimed.push(dir);
+    resourcePacks.push({
+      dir,
+      format: Number(meta.pack_format) || null,
+      title: plainPackDescription(meta.description) || lastName(dir) || name,
+      folderName: lastName(dir) && !GENERIC_PACK_NAME.test(lastName(dir)) ? lastName(dir) : name
+    });
+  }
+
+  for (const dir of withShaders) {
+    const p = dir + '/shaders/';
+    // A resource pack keeps its own shaders under assets; those are not a
+    // shader pack.
+    if (isClaimed(p) || dir === '' || /(^|\/)assets(\/|$)/.test(dir)) continue;
+    claimed.push(dir);
+    shaders.push({ dir, title: lastName(dir) });
+  }
+
+  // Archives inside the archive: a resource pack, a world or a shader pack
+  // shipped zipped, the way the game itself also accepts them.
+  for (const entry of files) {
+    const p = pathOf(entry);
+    if (!/\.zip$/i.test(p) || isClaimed(p)) continue;
+    let inner;
+    try { inner = new AdmZip(entry.getData()); } catch { continue; }
+    const innerNames = inner.getEntries().map(item => item.entryName.replace(/\\/g, '/'));
+    const atTop = file => innerNames.find(item => item === file || /^[^/]+\/[^/]+$/.test(item) && lastName(item) === file);
+    const title = lastName(p).replace(/\.zip$/i, '');
+
+    if (atTop('level.dat')) {
+      const levelDat = atTop('level.dat');
+      worlds.push({ zip: p, inner: dirOf(levelDat), title: dirOf(levelDat) || title });
+      claimed.push(p);
+    } else if (atTop('pack.mcmeta') && innerNames.some(item => /(^|\/)assets\//.test(item))) {
+      const meta = lenientJson(inner.getEntry(atTop('pack.mcmeta')).getData().toString('utf-8'))?.pack || {};
+      resourcePacks.push({
+        zip: p,
+        format: Number(meta.pack_format) || null,
+        title: plainPackDescription(meta.description) || title,
+        folderName: title
+      });
+      claimed.push(p);
+    } else if (innerNames.some(item => /^([^/]+\/)?shaders\//.test(item))) {
+      shaders.push({ zip: p, title });
+      claimed.push(p);
+    }
+  }
+
+  // A config folder belongs to the pack's mods, as it would in a game folder.
+  const configDirs = [];
+  for (const entry of files) {
+    const p = pathOf(entry);
+    if (isClaimed(p)) continue;
+    const parts = p.split('/');
+    const at = parts.findIndex(part => part.toLowerCase() === 'config');
+    if (at === -1 || at === parts.length - 1) continue;
+    const dir = parts.slice(0, at + 1).join('/');
+    if (!configDirs.includes(dir)) configDirs.push(dir);
+  }
+  const inConfig = p => configDirs.some(dir => inside(p, dir));
+
+  // Mods, grouped by the folder they came in. The folder is how an author says
+  // "these are optional" or "this set is for Forge, that one for Fabric".
+  const groups = new Map();
+  const unknown = new Set();
+  for (const entry of files) {
+    const p = pathOf(entry);
+    if (!/\.jar$/i.test(p) || isClaimed(p) || inConfig(p)) continue;
+    const about = describeModJar(entry.getData());
+    const dir = dirOf(p);
+    // A jar that says nothing about itself is still a mod if it sits in a
+    // folder called mods - old Forge mods often said nothing.
+    if (!about && lastName(dir).toLowerCase() !== 'mods') {
+      unknown.add(p);
+      continue;
+    }
+    if (!groups.has(dir)) {
+      groups.set(dir, {
+        id: `g${groups.size}`,
+        dir,
+        title: lastName(dir) || name,
+        optional: OPTIONAL_FOLDER.test(dir),
+        mods: []
+      });
+    }
+    groups.get(dir).mods.push({
+      path: p,
+      filename: lastName(p),
+      title: about?.title || lastName(p).replace(/\.jar$/i, ''),
+      loader: about?.loader || null,
+      allows: about?.allows || (() => true)
+    });
+  }
+
+  // The author's own words: any document that is not part of something else.
+  const docs = files.map(pathOf).filter(p => DOC_FILE.test(p) && !isClaimed(p) && !inConfig(p));
+  const depth = p => p.split('/').length;
+  const readme = docs.filter(p => README_NAME.test(lastName(p))).sort((a, b) => depth(a) - depth(b))[0] ||
+    (docs.length === 1 ? docs[0] : docs.find(p => /\.(txt|md)$/i.test(p))) || null;
+
+  for (const entry of files) {
+    const p = pathOf(entry);
+    if (isClaimed(p) || inConfig(p) || docs.includes(p) || /\.jar$/i.test(p)) continue;
+    unknown.add(p);
+  }
+
+  // Which version it is for. The mods have the strongest say - each one
+  // states what it runs on - then the resource pack's format, then the
+  // author's instructions, which usually name the version in so many words.
+  const releases = await releaseIds();
+  const docText = docs.filter(p => /\.(txt|md|html?)$/i.test(p))
+    .map(p => zip.getEntry(p) || files.find(entry => pathOf(entry) === p))
+    .filter(Boolean)
+    .map(entry => entry.getData().toString('utf-8').slice(0, 200000))
+    .join('\n');
+  // Not \b: authors write "v0.17.2", and there is no word boundary between
+  // the v and the number.
+  const mentioned = new Set(docText.match(/(?<![\d.])\d+\.\d+(?:\.\d+)*/g) || []);
+
+  const allMods = [...groups.values()].flatMap(group => group.mods);
+  let candidates = releases;
+  if (allMods.length) {
+    const score = version => allMods.filter(mod => mod.allows(version)).length;
+    const best = Math.max(0, ...releases.map(score));
+    if (best > 0) candidates = releases.filter(version => score(version) === best);
+  }
+  const formats = resourcePacks.map(pack => RESOURCE_PACK_FORMATS[pack.format]).filter(Boolean);
+  if (formats.length) {
+    const narrowed = candidates.filter(version => formats.every(([low, high]) => versionWithin(version, low, high)));
+    if (narrowed.length) candidates = narrowed;
+  }
+  const narrowedByMods = allMods.length > 0 || formats.length > 0;
+  const named = candidates.filter(version => mentioned.has(version));
+  const version = named[0] || (narrowedByMods && candidates.length < releases.length ? candidates[0] : null) || null;
+
+  return {
+    name,
+    version,
+    releases,
+    groups: [...groups.values()],
+    resourcePacks,
+    worlds,
+    shaders,
+    configDirs,
+    docs,
+    readme,
+    mentioned: [...mentioned],
+    unknown: [...unknown]
+  };
+}
+
+function versionWithin(version, low, high) {
+  return compareVersionNumbers(version, low) >= 0 && compareVersionNumbers(version, high) <= 0;
+}
+
+// The loader a set of mods needs. Quilt runs Fabric's mods, so the two
+// together are a Quilt pack, not a contradiction.
+function loaderForMods(mods) {
+  const loaders = new Set(mods.map(mod => mod.loader).filter(Boolean));
+  if (loaders.has('quilt')) loaders.delete('fabric');
+  return [...loaders];
+}
+
+// What the page is shown. Paths and functions stay here.
+function describePlanForPage(plan) {
+  const top = list => list.slice(0, 12);
+  // The first folder of each unrecognised file is enough to say what it was.
+  const unknownNames = [...new Set(plan.unknown.map(p => p.split('/').slice(0, 2).join('/')))];
+  return {
+    kind: 'loose',
+    name: plan.name,
+    version: plan.version,
+    releases: plan.releases,
+    groups: plan.groups.map(group => ({
+      id: group.id,
+      title: group.title,
+      optional: group.optional,
+      count: group.mods.length,
+      loaders: loaderForMods(group.mods)
+    })),
+    resourcePacks: plan.resourcePacks.map(pack => pack.title),
+    worlds: plan.worlds.map(world => world.title),
+    shaders: plan.shaders.map(shader => shader.title),
+    hasConfig: plan.configDirs.length > 0,
+    readme: plan.readme ? plan.readme.split('/').pop() : null,
+    unknown: top(unknownNames),
+    unknownMore: Math.max(0, unknownNames.length - 12)
+  };
+}
+
+// The archive is read once to be shown and once more to be installed. Large
+// packs run to hundreds of megabytes, so the one read is kept in between.
+let looseImport = null;
+
+async function inspectLocalModpack(filePath) {
+  if (!fs.existsSync(filePath)) throw new Error('there is no such file');
+  const zip = new AdmZip(filePath);
+  if (zip.getEntry('modrinth.index.json')) return { kind: 'mrpack' };
+
+  const plan = await planLooseArchive(zip, filePath);
+  const nothing = !plan.groups.length && !plan.resourcePacks.length && !plan.worlds.length && !plan.shaders.length;
+  if (nothing) throw new Error('nothing in this archive is a mod, a resource pack, a shader or a world');
+
+  looseImport = { filePath, mtimeMs: fs.statSync(filePath).mtimeMs, zip, plan };
+  return describePlanForPage(plan);
+}
+
+// Writes one file out of the archive, refusing any path that climbs out of
+// where it is meant to land.
+function extractTo(folder, relative, data) {
+  const target = safeInside(folder, relative);
+  if (!target) return false;
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, data);
+  return true;
+}
+
+// Everything in a folder of the archive, laid out under a folder on disk.
+function extractFolder(entries, dir, target, written) {
+  const pathOf = entry => entry.entryName.replace(/\\/g, '/');
+  for (const entry of entries) {
+    const p = pathOf(entry);
+    if (dir !== '' && !p.startsWith(dir + '/')) continue;
+    extractTo(target, dir === '' ? p : p.slice(dir.length + 1), entry.getData());
+    written();
+  }
+}
+
+// A free folder name in the shared folders. A world or a resource pack already
+// there is somebody's, and is never overwritten.
+function freeTarget(folder, wanted, note) {
+  const target = path.join(folder, folderSafeName(wanted) || 'Pack');
+  return fs.existsSync(target) ? freeNameBeside(target, folderSafeName(note) || 'import') : target;
+}
+
+async function installLooseArchive(filePath, choices, report = () => {}) {
+  if (!looseImport || looseImport.filePath !== filePath ||
+      looseImport.mtimeMs !== fs.statSync(filePath).mtimeMs) {
+    await inspectLocalModpack(filePath);
+  }
+  const { zip, plan } = looseImport;
+  const version = String(choices?.version || '');
+  if (!NUMERIC_VERSION.test(version)) throw new Error('no version of the game was chosen');
+
+  const chosen = plan.groups.filter(group => (choices.groups || []).includes(group.id));
+  const mods = chosen.flatMap(group => group.mods);
+  const loaders = loaderForMods(mods);
+  if (loaders.length > 1) throw new Error(`these mods are for different loaders: ${loaders.join(', ')}`);
+  const loader = loaders[0] || 'vanilla';
+
+  // The build of the loader the author named, if they did - instructions often
+  // say "Fabric 0.17.2" - and the newest stable one otherwise.
+  let loaderVersion = null;
+  if (loader !== 'vanilla') {
+    report({ stage: 'loader' });
+    let builds = [];
+    try { builds = await modLoaders[loader].listVersions(version); } catch {}
+    if (!builds.length) throw new Error(`${loader} has nothing for Minecraft ${version}`);
+    const named = builds.find(build => plan.mentioned.includes(build.version));
+    loaderVersion = (named || builds.find(build => build.stable) || builds[0]).version;
+  }
+
+  const store = loadInstances();
+  const name = String(choices.name || '').trim() || plan.name;
+  const instance = {
+    id: instanceId(name, store.instances.map(entry => entry.id)),
+    name,
+    version,
+    loader,
+    loaderVersion,
+    ram: null,
+    fromModpack: { source: 'file', from: filePath },
+    createdAt: new Date().toISOString()
+  };
+
+  const entries = zip.getEntries().filter(entry => !entry.isDirectory);
+  const pathOf = entry => entry.entryName.replace(/\\/g, '/');
+  const inside = (p, dir) => dir === '' || p.startsWith(dir + '/');
+  const gameFolder = loadSettings().gameFolder;
+
+  // Counted up front so the bar means something.
+  const total = mods.length +
+    plan.resourcePacks.reduce((sum, pack) => sum + (pack.zip ? 1 : entries.filter(e => inside(pathOf(e), pack.dir)).length), 0) +
+    plan.worlds.reduce((sum, world) => sum + (world.zip ? 1 : entries.filter(e => inside(pathOf(e), world.dir)).length), 0) +
+    plan.shaders.reduce((sum, shader) => sum + (shader.zip ? 1 : entries.filter(e => inside(pathOf(e), shader.dir)).length), 0) +
+    plan.configDirs.reduce((sum, dir) => sum + entries.filter(e => inside(pathOf(e), dir)).length, 0);
+
+  let done = 0;
+  let lastReport = 0;
+  let label = '';
+  // Thousands of small files are written in one go. Every so often the loop
+  // steps aside, so the progress bar is drawn and the window stays alive.
+  const written = async () => {
+    done++;
+    if (Date.now() - lastReport > 150) {
+      lastReport = Date.now();
+      report({ stage: 'files', done, total, name: label });
+      await new Promise(resolve => setImmediate(resolve));
+    }
+  };
+  const writtenSync = () => { done++; };
+  const pause = async () => {
+    report({ stage: 'files', done, total, name: label });
+    await new Promise(resolve => setImmediate(resolve));
+  };
+
+  const modsDir = packContentDir(instance, 'mods');
+  fs.mkdirSync(modsDir, { recursive: true });
+  for (const mod of mods) {
+    label = mod.filename;
+    extractTo(modsDir, mod.filename, zip.getEntry(mod.path).getData());
+    rememberMod(instance, { filename: mod.filename, title: mod.title, source: null, projectId: null, kind: 'mod' });
+    await written();
+  }
+
+  const configDir = packContentDir(instance, 'config');
+  for (const dir of plan.configDirs) {
+    label = 'config';
+    for (const entry of entries.filter(e => inside(pathOf(e), dir))) {
+      extractTo(configDir, pathOf(entry).slice(dir.length + 1), entry.getData());
+      await written();
+    }
+  }
+
+  // Resource packs are shared between packs, so they go to the shared folder,
+  // and the pack remembers which ones it brought - those are switched on when
+  // it is played and off when something else is.
+  const enabled = [];
+  for (const pack of plan.resourcePacks) {
+    label = pack.title;
+    const folder = path.join(gameFolder, 'resourcepacks');
+    if (pack.zip) {
+      const target = freeTarget(folder, `${pack.folderName}.zip`, name);
+      extractTo(folder, path.basename(target), zip.getEntry(pack.zip).getData());
+      enabled.push(path.basename(target));
+      await written();
+    } else {
+      const target = freeTarget(folder, pack.folderName, name);
+      for (const entry of entries.filter(e => inside(pathOf(e), pack.dir))) {
+        const p = pathOf(entry);
+        extractTo(target, pack.dir === '' ? p : p.slice(pack.dir.length + 1), entry.getData());
+        await written();
+      }
+      enabled.push(path.basename(target));
+    }
+  }
+  if (enabled.length) instance.resourcePacks = enabled;
+
+  for (const world of plan.worlds) {
+    label = world.title;
+    const target = freeTarget(path.join(gameFolder, 'saves'), world.title, name);
+    if (world.zip) {
+      const inner = new AdmZip(zip.getEntry(world.zip).getData());
+      extractFolder(inner.getEntries().filter(entry => !entry.isDirectory), world.inner, target, writtenSync);
+      await pause();
+    } else {
+      for (const entry of entries.filter(e => inside(pathOf(e), world.dir))) {
+        const p = pathOf(entry);
+        extractTo(target, world.dir === '' ? p : p.slice(world.dir.length + 1), entry.getData());
+        await written();
+      }
+    }
+  }
+
+  for (const shader of plan.shaders) {
+    label = shader.title;
+    const folder = path.join(gameFolder, 'shaderpacks');
+    if (shader.zip) {
+      const target = freeTarget(folder, `${shader.title}.zip`, name);
+      extractTo(folder, path.basename(target), zip.getEntry(shader.zip).getData());
+      await written();
+    } else {
+      const target = freeTarget(folder, shader.title, name);
+      for (const entry of entries.filter(e => inside(pathOf(e), shader.dir))) {
+        extractTo(target, pathOf(entry).slice(shader.dir.length + 1), entry.getData());
+        await written();
+      }
+    }
+  }
+
+  // The author's documents travel with the pack, so they can be opened again
+  // from its page long after the archive is gone.
+  if (plan.docs.length) {
+    const docsDir = path.join(packRecordDir(instance), 'docs');
+    for (const doc of plan.docs) {
+      const target = freeTargetFile(docsDir, doc.split('/').pop());
+      extractTo(docsDir, path.basename(target), zip.getEntry(doc).getData());
+      if (doc === plan.readme) instance.readme = path.basename(target);
+    }
+  }
+
+  store.instances.push(instance);
+  store.activeId = instance.id;
+  saveInstances(store);
+  looseImport = null;
+
+  report({ stage: 'done', done: total, total });
+  if (instance.readme) openPackReadme(instance);
+  return { id: instance.id, name: instance.name, version, loader, files: total };
+}
+
+// Two documents called readme.txt from two folders of the archive.
+function freeTargetFile(folder, name) {
+  const target = path.join(folder, folderSafeName(name) || 'readme.txt');
+  if (!fs.existsSync(target)) return target;
+  const ext = path.extname(target);
+  for (let n = 2; n < 100; n++) {
+    const candidate = path.join(folder, `${path.basename(target, ext)} (${n})${ext}`);
+    if (!fs.existsSync(candidate)) return candidate;
+  }
+  return target;
+}
+
+function openPackReadme(instance) {
+  if (!instance?.readme) return false;
+  const file = path.join(packRecordDir(instance), 'docs', path.basename(instance.readme));
+  if (!fs.existsSync(file)) return false;
+  shell.openPath(file);
+  return true;
+}
+
+// The resource packs a pack brought with it are switched on when that pack
+// starts to be played, at the top of the list as such packs ask to be, and
+// switched off again when something else is played - a Portal texture pack has
+// no business in somebody's survival world. Only on the change of hands: if
+// the player turns one off while playing the pack, that choice stands.
+//
+// Packs the player chose for themselves are never touched.
+function applyPackResourcePacks(gameFolder, pack, version) {
+  const instances = loadInstances().instances;
+  if (!instances.some(entry => entry.resourcePacks?.length)) return;
+
+  // Before 1.13 the list holds bare names; after, names with "file/" in front.
+  const modern = !NUMERIC_VERSION.test(version) || compareVersionNumbers(version, '1.13') >= 0;
+  const asListed = name => (modern ? `file/${name}` : name);
+  const everyone = new Set(instances.flatMap(entry => entry.resourcePacks || [])
+    .flatMap(name => [`file/${name}`, name]));
+  const mine = (pack?.resourcePacks || []).map(asListed);
+
+  const optionsPath = path.join(gameFolder, 'options.txt');
+  const lines = fs.existsSync(optionsPath) ? fs.readFileSync(optionsPath, 'utf-8').split(/\r?\n/) : [];
+  const at = lines.findIndex(line => line.startsWith('resourcePacks:'));
+  let list = modern ? ['vanilla'] : [];
+  if (at >= 0) {
+    const parsed = lenientJson(lines[at].slice('resourcePacks:'.length));
+    if (Array.isArray(parsed)) list = parsed;
+  }
+
+  const before = JSON.stringify(list);
+  list = list.filter(name => !everyone.has(name) || mine.includes(name));
+  // Last in the list is top of the list in the game.
+  for (const name of mine) if (!list.includes(name)) list.push(name);
+  if (JSON.stringify(list) === before) return;
+
+  const line = `resourcePacks:${JSON.stringify(list)}`;
+  if (at >= 0) lines[at] = line;
+  else if (lines.length && lines[lines.length - 1] === '') lines.splice(lines.length - 1, 0, line);
+  else lines.push(line);
+  fs.writeFileSync(optionsPath, lines.join('\n'));
 }
 
 // Minecraft writes its own account of a crash here, and it says far more than

@@ -765,3 +765,125 @@
 .version-filter:focus {
   border-color: #00af5c;
 }
+
+/* What was found in a hand-made pack archive: one line per thing, label on
+   the left, what it is on the right. */
+.import-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: min(520px, 100%);
+}
+
+.import-row {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 5px;
+  font-size: 14px;
+  color: #333;
+}
+
+.import-label {
+  color: #777;
+}
+
+.import-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A set of mods is ticked on and off with the whole line, not only the box. */
+.import-check {
+  cursor: pointer;
+}
+
+.import-check:hover {
+  background: #f0f0f0;
+}
+
+.import-check input {
+  margin: 0 6px 0 0;
+  vertical-align: -2px;
+  accent-color: #00af5c;
+  cursor: pointer;
+}
+
+.import-tag {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: #eef3ee;
+  color: #4b7a50;
+  font-size: 12px;
+}
+
+.import-select {
+  justify-self: start;
+  padding: 5px 8px;
+  font-size: 14px;
+  font-family: inherit;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: white;
+  outline: none;
+}
+
+.modal-box button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The author's pack sits in the list like any other row; the slot around it
+   takes no part in the layout, so the list keeps its grid in boxes view. */
+.featured-slot {
+  display: contents;
+}
+
+.pack-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* Not installed yet, and an update waiting: both ask for a click, so both
+   take the colour of the download tile rather than the green of "chosen". */
+.pack-badge.offer,
+.pack-badge.update {
+  background: #f1e7c4;
+  color: #7a6420;
+}
+
+.featured-files {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  color: #888;
+}
+
+.featured-heading {
+  margin: 14px 0 6px;
+  font-size: 15px;
+}
+
+/* The author's post, as written: line breaks kept, long ones scroll. */
+.featured-changelog {
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: #f5f5f5;
+  border-radius: 5px;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #333;
+}
+
+.pack-badge.hidden {
+  display: none;
+}

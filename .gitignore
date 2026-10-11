@@ -25,3 +25,8 @@ modrinth-versions.json
 # Local tooling notes and settings
 .claude/
 CLAUDE.md
+
+# Packs prepared for publishing - made by scripts/make-pack-manifest.js.
+build/
+# The last published list of the author's pack, kept for playing offline.
+featured-pack.json
